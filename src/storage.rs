@@ -20,6 +20,8 @@ const CACHE_DIR: &str = ".codesift";
 const INDEX_FILE: &str = "index.bin";
 const MANIFEST_FILE: &str = "manifest.json";
 const HASHES_FILE: &str = "hashes.bin";
+#[cfg(feature = "semantic")]
+const SEMANTIC_INDEX_FILE: &str = "semantic.bin";
 
 /// Cache manifest containing metadata.
 #[derive(Debug, Serialize, Deserialize)]
@@ -72,6 +74,18 @@ impl Storage {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
+
+        #[cfg(feature = "semantic")]
+        let has_semantic_index = {
+            let semantic_bytes = crate::retrieval::RetrievalEngine::default()
+                .get_semantic_index()
+                .serialize();
+            fs::write(self.cache_dir.join(SEMANTIC_INDEX_FILE), &semantic_bytes)?;
+            !semantic_bytes.is_empty()
+        };
+
+        #[cfg(not(feature = "semantic"))]
+        let _has_semantic_index = false;
 
         // Save manifest
         let manifest = Manifest {
@@ -160,6 +174,23 @@ impl Storage {
         }
 
         Ok((index, refs))
+    }
+
+    /// Load cached semantic index data when the semantic feature is enabled.
+    #[cfg(feature = "semantic")]
+    pub fn load_semantic_index(&self) -> std::io::Result<Option<crate::semantic::SemanticIndex>> {
+        let path = self.cache_dir.join(SEMANTIC_INDEX_FILE);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let bytes = fs::read(path)?;
+        Ok(crate::semantic::SemanticIndex::deserialize(&bytes))
+    }
+
+    /// Check whether a cached semantic index exists.
+    #[cfg(feature = "semantic")]
+    pub fn has_semantic_index(&self) -> bool {
+        self.cache_dir.join(SEMANTIC_INDEX_FILE).exists()
     }
 
     /// Get cached file hashes for invalidation checking.

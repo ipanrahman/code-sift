@@ -40,6 +40,13 @@ thiserror = "1.0"
 # Filesystem watching (incremental indexing)
 notify = "6.1"
 
+# Serialization for semantic index
+bincode = { version = "1.3", optional = true }
+
+[features]
+default = []
+semantic = ["dep:bincode"]
+
 [dev-dependencies]
 criterion = "0.5"
 tempfile = "3.12"

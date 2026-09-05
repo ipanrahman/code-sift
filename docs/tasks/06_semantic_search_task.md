@@ -47,4 +47,4 @@ This should only be added after:
 - Token savings vs pure lexical
 
 ## Status
-- [ ] Not started (Future)
+- [x] Completed

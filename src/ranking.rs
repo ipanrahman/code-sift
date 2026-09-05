@@ -13,6 +13,7 @@ pub struct RelevanceScore {
     pub callee: f64,
     pub test: f64,
     pub lexical: f64,
+    pub semantic: f64,
 }
 
 impl Default for RelevanceScore {
@@ -26,6 +27,7 @@ impl Default for RelevanceScore {
             callee: 0.0,
             test: 0.0,
             lexical: 0.0,
+            semantic: 0.0,
         }
     }
 }
@@ -38,15 +40,18 @@ pub struct RankedCandidate {
     pub relationship: Option<Relationship>,
 }
 
-/// Rank candidates based on structural signals.
+/// Rank candidates based on structural and semantic signals.
 pub fn rank_candidates(
     candidates: Vec<(Symbol, Option<Relationship>)>,
+    semantic_scores: &[f64],
     query: &str,
 ) -> Vec<RankedCandidate> {
     let mut ranked: Vec<RankedCandidate> = candidates
         .into_iter()
-        .map(|(symbol, relationship)| {
-            let score = compute_score(&symbol, relationship.as_ref(), query);
+        .enumerate()
+        .map(|(i, (symbol, relationship))| {
+            let semantic_score = semantic_scores.get(i).copied().unwrap_or(0.0);
+            let score = compute_score(&symbol, relationship.as_ref(), query, semantic_score);
             RankedCandidate {
                 symbol,
                 score,
@@ -60,7 +65,12 @@ pub fn rank_candidates(
     ranked
 }
 
-fn compute_score(symbol: &Symbol, relationship: Option<&Relationship>, query: &str) -> RelevanceScore {
+fn compute_score(
+    symbol: &Symbol,
+    relationship: Option<&Relationship>,
+    query: &str,
+    semantic_score: f64,
+) -> RelevanceScore {
     let mut score = RelevanceScore::default();
 
     // Exact symbol match
@@ -91,9 +101,12 @@ fn compute_score(symbol: &Symbol, relationship: Option<&Relationship>, query: &s
         }
     }
 
+    // Semantic score: scale from [0,1] to [0, 100]
+    score.semantic = semantic_score * 100.0;
+
     // Calculate total
     score.total = score.symbol_match + score.definition + score.reference
-        + score.caller + score.callee + score.test + score.lexical;
+        + score.caller + score.callee + score.test + score.lexical + score.semantic;
 
     score
 }

@@ -19,6 +19,11 @@ pub mod storage;
 pub mod types;
 pub mod watcher;
 
+#[cfg(feature = "semantic")]
+pub mod semantic;
+#[cfg(feature = "semantic")]
+pub mod retrieval;
+
 #[cfg(test)]
 pub mod watcher_tests;
 #[cfg(test)]
@@ -34,12 +39,26 @@ use crate::types::{FileEntry, FileId, Relationship, Symbol, SymbolId};
 
 
 /// Main CodeSift engine.
-#[derive(Clone)]
 pub struct CodeSift {
     index: Index,
     parser: Parser,
     references: ReferenceIndex,
     repo_path: Option<std::path::PathBuf>,
+    #[cfg(feature = "semantic")]
+    retrieval_engine: retrieval::RetrievalEngine,
+}
+
+impl Clone for CodeSift {
+    fn clone(&self) -> Self {
+        Self {
+            index: self.index.clone(),
+            parser: self.parser.clone(),
+            references: self.references.clone(),
+            repo_path: self.repo_path.clone(),
+            #[cfg(feature = "semantic")]
+            retrieval_engine: self.retrieval_engine.clone(),
+        }
+    }
 }
 
 impl CodeSift {
@@ -50,6 +69,8 @@ impl CodeSift {
             parser: Parser::new(),
             references: ReferenceIndex::new(),
             repo_path: None,
+            #[cfg(feature = "semantic")]
+            retrieval_engine: retrieval::RetrievalEngine::new(),
         }
     }
 
@@ -58,12 +79,8 @@ impl CodeSift {
         let path = path.as_ref().to_path_buf();
         let repo = repository::Repository::open(&path)?;
 
-        let mut codesift = Self {
-            index: Index::new(),
-            parser: Parser::new(),
-            references: ReferenceIndex::new(),
-            repo_path: Some(path.clone()),
-        };
+        let mut codesift = Self::new();
+        codesift.repo_path = Some(path.clone());
 
         let mut all_calls: Vec<crate::parser::CallReference> = Vec::new();
         let mut all_parsed_symbols: Vec<(SymbolId, String)> = Vec::new();
@@ -98,6 +115,12 @@ impl CodeSift {
         }
 
         codesift.resolve_all_references(&all_calls, &all_parsed_symbols);
+
+        // Build semantic index if feature is enabled
+        #[cfg(feature = "semantic")]
+        {
+            codesift.retrieval_engine.build_index(&codesift.index);
+        }
 
         Ok(codesift)
     }
@@ -140,12 +163,24 @@ impl CodeSift {
 
                 if !crate::storage::files_changed(&cached_hashes, &current_hashes) {
                     // Cache is valid, use it
-                    return Ok(Self {
-                        index,
-                        parser: Parser::new(),
-                        references,
-                        repo_path: Some(path),
-                    });
+                    let mut codesift = Self::new();
+                    codesift.index = index;
+                    codesift.references = references;
+                    codesift.repo_path = Some(path);
+
+                    // Load semantic index from cache if available
+                    #[cfg(feature = "semantic")]
+                    {
+                        if let Ok(Some(semantic_index)) = storage.load_semantic_index() {
+                            let mut engine = codesift.retrieval_engine;
+                            engine.build_index_from(semantic_index);
+                            codesift.retrieval_engine = engine;
+                        } else {
+                            codesift.retrieval_engine.build_index(&codesift.index);
+                        }
+                    }
+
+                    return Ok(codesift);
                 }
             }
         }
@@ -171,6 +206,19 @@ impl CodeSift {
             max_results: 1000,
         };
         search(&search_query, &self.index, &budget)
+    }
+
+    /// Search with semantic/AI understanding (requires semantic feature).
+    #[cfg(feature = "semantic")]
+    pub fn semantic_search(&self, query: &str, budget: Option<TokenBudget>) -> Vec<retrieval::RetrievalResult> {
+        let budget = budget.unwrap_or_default();
+        self.retrieval_engine.search(query, &self.index, &budget)
+    }
+
+    /// Analyze a query to determine the best retrieval mode.
+    #[cfg(feature = "semantic")]
+    pub fn analyze_query(query: &str) -> retrieval::RetrievalMode {
+        retrieval::analyze_query(query)
     }
 
     /// Search for a symbol by name.
@@ -234,10 +282,12 @@ impl CodeSift {
 
         // Step 1: Find candidates via symbol search and lexical search
         let mut candidates: Vec<(Symbol, Option<Relationship>)> = Vec::new();
+        let mut semantic_scores: Vec<f64> = Vec::new();
 
         // Symbol matches
         for symbol in self.find_symbol(query) {
             candidates.push((symbol.clone(), Some(Relationship::References)));
+            semantic_scores.push(0.0);
         }
 
         // Lexical matches - add as raw candidates
@@ -254,11 +304,32 @@ impl CodeSift {
                     signature: None,
                 };
                 candidates.push((sym, None));
+                semantic_scores.push(0.0);
+            }
+        }
+
+        // Semantic matches - add as raw candidates when feature is enabled
+        #[cfg(feature = "semantic")]
+        {
+            let semantic_results = self.semantic_search(query, Some(budget));
+            for r in semantic_results {
+                let sym = Symbol {
+                    id: SymbolId::new(0),
+                    name: format!("semantic:{}:{}", r.file_id.0, r.range.start_byte),
+                    kind: crate::types::SymbolKind::Variable,
+                    file_id: r.file_id,
+                    range: r.range,
+                    parent: None,
+                    visibility: crate::types::Visibility::Public,
+                    signature: None,
+                };
+                candidates.push((sym, None));
+                semantic_scores.push(r.semantic_score);
             }
         }
 
         // Step 2: Rank candidates
-        let ranked = rank_candidates(candidates, query);
+        let ranked = rank_candidates(candidates, &semantic_scores, query);
 
         // Step 3: Plan context with token budget
         let plan = plan_context(ranked, &budget, |file_id, range| {
@@ -400,6 +471,13 @@ impl CodeSift {
         }
 
         self.resolve_all_references(&all_calls, &all_parsed_symbols);
+
+        // Rebuild semantic index
+        #[cfg(feature = "semantic")]
+        {
+            self.retrieval_engine.build_index(&self.index);
+        }
+
         Ok(())
     }
 
