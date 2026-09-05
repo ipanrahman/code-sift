@@ -16,6 +16,9 @@ Thumbs.db
 # MCP
 .codesift/
 
+# Search index (zvec-grep)
+.zvec-grep/
+
 # Temp
 *.tmp
 *.log
