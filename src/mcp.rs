@@ -5,6 +5,12 @@
 use crate::{CodeSift, ContextPlan, TokenBudget};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
+
+/// Default request timeout.
+const DEFAULT_TIMEOUT_MS: u64 = 30000;
 
 /// JSON-RPC 2.0 request.
 #[derive(Debug, Deserialize)]
@@ -42,6 +48,8 @@ pub mod error_codes {
     pub const METHOD_NOT_FOUND: i32 = -32601;
     pub const INVALID_PARAMS: i32 = -32602;
     pub const INTERNAL_ERROR: i32 = -32603;
+    pub const REQUEST_CANCELLED: i32 = -32800;
+    pub const REQUEST_TIMEOUT: i32 = -32801;
 }
 
 /// MCP tool definitions.
@@ -58,6 +66,16 @@ pub struct ToolResult {
     pub content: Vec<ContentBlock>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<ToolResultMeta>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolResultMeta {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens_used: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,10 +85,88 @@ pub enum ContentBlock {
     Text { text: String },
 }
 
+/// Progress notification for long operations.
+#[derive(Debug, Serialize)]
+pub struct ProgressNotification {
+    pub jsonrpc: String,
+    pub method: String,
+    pub params: ProgressParams,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProgressParams {
+    pub token: String,
+    pub progress: f64,
+    pub total: Option<f64>,
+    pub message: Option<String>,
+}
+
+/// Workspace information.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Workspace {
+    pub path: String,
+    pub name: String,
+}
+
+/// Session state.
+#[derive(Debug, Clone)]
+pub struct Session {
+    pub id: String,
+    pub workspace: Option<Workspace>,
+    pub created_at: u64,
+    pub request_count: u64,
+    pub cancelled_requests: u64,
+}
+
+/// Cancellation token for request cancellation.
+#[derive(Debug, Clone)]
+pub struct CancellationToken {
+    cancelled: Arc<AtomicBool>,
+    request_id: Arc<AtomicU64>,
+}
+
+impl CancellationToken {
+    pub fn new() -> Self {
+        Self {
+            cancelled: Arc::new(AtomicBool::new(false)),
+            request_id: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+
+    pub fn reset(&self) {
+        self.cancelled.store(false, Ordering::SeqCst);
+    }
+
+    pub fn set_request_id(&self, id: u64) {
+        self.request_id.store(id, Ordering::SeqCst);
+    }
+
+    pub fn get_request_id(&self) -> u64 {
+        self.request_id.load(Ordering::SeqCst)
+    }
+}
+
+impl Default for CancellationToken {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// MCP server state.
 pub struct McpServer {
     codesift: CodeSift,
     initialized: bool,
+    session: Option<Session>,
+    cancellation_token: CancellationToken,
+    timeout_ms: u64,
 }
 
 impl McpServer {
@@ -78,12 +174,25 @@ impl McpServer {
         Self {
             codesift,
             initialized: false,
+            session: None,
+            cancellation_token: CancellationToken::new(),
+            timeout_ms: DEFAULT_TIMEOUT_MS,
         }
+    }
+
+    /// Get the cancellation token for external cancellation.
+    pub fn cancellation_token(&self) -> &CancellationToken {
+        &self.cancellation_token
+    }
+
+    /// Set request timeout in milliseconds.
+    pub fn set_timeout(&mut self, ms: u64) {
+        self.timeout_ms = ms;
     }
 
     /// Process a JSON-RPC request and return response.
     pub fn handle(&mut self, request: JsonRpcRequest) -> JsonRpcResponse {
-        let id = request.id;
+        let id = request.id.clone();
 
         // Validate JSON-RPC version
         if request.jsonrpc != "2.0" {
@@ -107,6 +216,8 @@ impl McpServer {
             "shutdown" => self.handle_shutdown(),
             "cancel" => self.handle_cancel(request.params),
             "health" => self.handle_health(),
+            "session/status" => self.handle_session_status(),
+            "workspace/info" => self.handle_workspace_info(request.params),
             _ => Err((error_codes::METHOD_NOT_FOUND, format!("Unknown method: {}", request.method))),
         };
 
@@ -130,8 +241,29 @@ impl McpServer {
         }
     }
 
-    fn handle_initialize(&mut self, _params: Option<Value>) -> Result<Value, (i32, String)> {
+    fn handle_initialize(&mut self, params: Option<Value>) -> Result<Value, (i32, String)> {
+        // Check for timeout override in params
+        if let Some(ref p) = params {
+            if let Some(timeout) = p.get("timeout").and_then(|v| v.as_u64()) {
+                self.timeout_ms = timeout;
+            }
+        }
+
         self.initialized = true;
+        self.session = Some(Session {
+            id: format!("session-{}", std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()),
+            workspace: None,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            request_count: 0,
+            cancelled_requests: 0,
+        });
+
         Ok(serde_json::json!({
             "protocolVersion": "2024-11-05",
             "serverInfo": {
@@ -139,7 +271,9 @@ impl McpServer {
                 "version": "0.1.0"
             },
             "capabilities": {
-                "tools": {}
+                "tools": {},
+                "progress": {},
+                "cancellation": {}
             }
         }))
     }
@@ -149,7 +283,7 @@ impl McpServer {
         Ok(serde_json::json!({ "tools": tools }))
     }
 
-    fn handle_tools_call(&self, params: Option<Value>) -> Result<Value, (i32, String)> {
+    fn handle_tools_call(&mut self, params: Option<Value>) -> Result<Value, (i32, String)> {
         let params = params.ok_or((error_codes::INVALID_PARAMS, "Missing params".into()))?;
 
         let name = params.get("name")
@@ -161,11 +295,37 @@ impl McpServer {
             .map(|m| serde_json::Value::Object(m.clone()))
             .unwrap_or(serde_json::Value::Null);
 
+        // Update session request count
+        if let Some(ref mut session) = self.session {
+            session.request_count += 1;
+        }
+
+        // Execute with timeout
+        let start = Instant::now();
         let result = self.execute_tool(name, &arguments);
+
+        // Check if cancelled
+        if self.cancellation_token.is_cancelled() {
+            self.cancellation_token.reset();
+            return Err((error_codes::REQUEST_CANCELLED, "Request was cancelled".into()));
+        }
+
+        // Check timeout
+        if start.elapsed().as_millis() as u64 > self.timeout_ms {
+            return Err((error_codes::REQUEST_TIMEOUT, format!("Request timed out after {}ms", self.timeout_ms)));
+        }
+
+        // Add timing info
+        let duration_ms = start.elapsed().as_millis() as u64;
+        let meta = ToolResultMeta {
+            duration_ms: Some(duration_ms),
+            tokens_used: None,
+        };
 
         Ok(serde_json::json!({
             "content": result.content,
-            "isError": result.is_error.unwrap_or(false)
+            "isError": result.is_error.unwrap_or(false),
+            "meta": meta
         }))
     }
 
@@ -173,8 +333,14 @@ impl McpServer {
         Ok(serde_json::json!({ "shutdown": true }))
     }
 
-    fn handle_cancel(&self, _params: Option<Value>) -> Result<Value, (i32, String)> {
-        // Cancellation not yet implemented
+    fn handle_cancel(&mut self, _params: Option<Value>) -> Result<Value, (i32, String)> {
+        // Cancel the current request
+        self.cancellation_token.cancel();
+
+        if let Some(ref mut session) = self.session {
+            session.cancelled_requests += 1;
+        }
+
         Ok(serde_json::json!({ "cancelled": true }))
     }
 
@@ -182,8 +348,48 @@ impl McpServer {
         Ok(serde_json::json!({
             "status": "ok",
             "files": self.codesift.file_count(),
-            "symbols": self.codesift.symbol_count()
+            "symbols": self.codesift.symbol_count(),
+            "session": self.session.as_ref().map(|s| {
+                serde_json::json!({
+                    "id": s.id,
+                    "requests": s.request_count,
+                    "cancelled": s.cancelled_requests
+                })
+            })
         }))
+    }
+
+    fn handle_session_status(&self) -> Result<Value, (i32, String)> {
+        match &self.session {
+            Some(s) => Ok(serde_json::json!({
+                "id": s.id,
+                "workspace": s.workspace,
+                "created_at": s.created_at,
+                "request_count": s.request_count,
+                "cancelled_requests": s.cancelled_requests,
+                "initialized": self.initialized
+            })),
+            None => Ok(serde_json::json!({
+                "initialized": false
+            })),
+        }
+    }
+
+    fn handle_workspace_info(&self, _params: Option<Value>) -> Result<Value, (i32, String)> {
+        let workspace = self.session.as_ref().and_then(|s| s.workspace.clone());
+
+        if let Some(ref ws) = workspace {
+            Ok(serde_json::json!({
+                "path": ws.path,
+                "name": ws.name,
+                "files": self.codesift.file_count(),
+                "symbols": self.codesift.symbol_count()
+            }))
+        } else {
+            Ok(serde_json::json!({
+                "configured": false
+            }))
+        }
     }
 
     /// List available tools.
@@ -290,6 +496,7 @@ impl McpServer {
                     text: format!("Unknown tool: {}", name),
                 }],
                 is_error: Some(true),
+                meta: None,
             },
         }
     }
@@ -310,6 +517,7 @@ impl McpServer {
                 ToolResult {
                     content: vec![ContentBlock::Text { text: summary }],
                     is_error: None,
+                    meta: None,
                 }
             }
             Err(e) => self.error(&e.to_string()),
@@ -330,6 +538,7 @@ impl McpServer {
                     text: format!("Symbol '{}' not found", name),
                 }],
                 is_error: Some(true),
+                meta: None,
             };
         }
 
@@ -350,6 +559,7 @@ impl McpServer {
         ToolResult {
             content: vec![ContentBlock::Text { text: output }],
             is_error: None,
+            meta: None,
         }
     }
 
@@ -369,6 +579,10 @@ impl McpServer {
                 ToolResult {
                     content: vec![ContentBlock::Text { text: output }],
                     is_error: None,
+                    meta: Some(ToolResultMeta {
+                        duration_ms: None,
+                        tokens_used: Some(plan.total_tokens),
+                    }),
                 }
             }
             Err(e) => self.error(&e.to_string()),
@@ -389,6 +603,7 @@ impl McpServer {
                     text: format!("Symbol '{}' not found", symbol),
                 }],
                 is_error: Some(true),
+                meta: None,
             };
         }
 
@@ -409,6 +624,7 @@ impl McpServer {
         ToolResult {
             content: vec![ContentBlock::Text { text: output }],
             is_error: None,
+            meta: None,
         }
     }
 
@@ -426,6 +642,7 @@ impl McpServer {
                     text: format!("Symbol '{}' not found", symbol),
                 }],
                 is_error: Some(true),
+                meta: None,
             };
         }
 
@@ -446,6 +663,7 @@ impl McpServer {
         ToolResult {
             content: vec![ContentBlock::Text { text: output }],
             is_error: None,
+            meta: None,
         }
     }
 
@@ -463,6 +681,7 @@ impl McpServer {
                     text: format!("Symbol '{}' not found", name),
                 }],
                 is_error: Some(true),
+                meta: None,
             };
         }
 
@@ -476,6 +695,7 @@ impl McpServer {
                     text: format!("{}:{}:{}\n\n{}", file.path.display(), sym.range.start_line, sym.range.end_line, content),
                 }],
                 is_error: None,
+                meta: None,
             }
         } else {
             self.error("Failed to get file")
@@ -496,6 +716,7 @@ impl McpServer {
                     text: format!("Symbol '{}' not found", name),
                 }],
                 is_error: Some(true),
+                meta: None,
             };
         }
 
@@ -509,6 +730,7 @@ impl McpServer {
         ToolResult {
             content: vec![ContentBlock::Text { text: output }],
             is_error: None,
+            meta: None,
         }
     }
 
@@ -518,6 +740,7 @@ impl McpServer {
                 text: msg.to_string(),
             }],
             is_error: Some(true),
+            meta: None,
         }
     }
 
