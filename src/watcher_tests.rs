@@ -4,7 +4,6 @@
 mod tests {
     use crate::{CodeSift, FileChange, FsWatcher};
     use std::fs;
-    use std::path::Path;
     use tempfile::TempDir;
 
     #[test]
@@ -88,5 +87,29 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let watcher = FsWatcher::new(temp.path());
         assert!(watcher.is_ok());
+    }
+
+    #[test]
+    fn test_watch_and_process_change() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().canonicalize().unwrap();
+        let file_path = path.join("watch_test.rs");
+        fs::write(&file_path, "fn watch() {}\n").unwrap();
+
+        let mut codesift = CodeSift::open(path.clone()).unwrap();
+        let initial_count = codesift.symbol_count();
+
+        let mut watcher = FsWatcher::new(&path).unwrap();
+        watcher.watch(&path).unwrap();
+
+        // Simulate a modification event from the watcher
+        fs::write(&file_path, "fn watch() {}\nfn extra() {}\nfn another() {}\n").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        if let Some(change) = watcher.poll_changes() {
+            codesift.process_change(change).unwrap();
+        }
+
+        assert!(codesift.symbol_count() > initial_count);
     }
 }

@@ -40,6 +40,10 @@ struct Args {
     #[arg(long)]
     mcp: bool,
 
+    /// Watch repository for filesystem changes (incremental re-index)
+    #[arg(long)]
+    watch: bool,
+
     /// Show statistics
     #[arg(short, long)]
     verbose: bool,
@@ -71,6 +75,8 @@ fn main() -> anyhow::Result<()> {
 
     if args.mcp {
         run_mcp_server(codesift)
+    } else if args.watch {
+        run_watch(codesift)
     } else {
         run_cli(codesift, args)
     }
@@ -162,6 +168,11 @@ fn run_cli(codesift: CodeSift, args: Args) -> anyhow::Result<()> {
         eprintln!("Indexed {} files, {} symbols", codesift.file_count(), codesift.symbol_count());
     }
 
+    Ok(())
+}
+
+fn run_watch(mut codesift: CodeSift) -> anyhow::Result<()> {
+    codesift.watch()?;
     Ok(())
 }
 

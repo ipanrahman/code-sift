@@ -336,6 +336,29 @@ impl CodeSift {
     pub fn repo_path(&self) -> Option<&std::path::Path> {
         self.repo_path.as_deref()
     }
+
+    /// Watch repository for filesystem changes and re-index incrementally.
+    /// Blocks until interrupted (Ctrl+C).
+    pub fn watch(&mut self) -> Result<()> {
+        let repo_path = self.repo_path.clone().ok_or_else(|| {
+            crate::error::Error::Index("No repository path set".to_string())
+        })?;
+
+        let mut watcher = crate::FsWatcher::new(&repo_path)?;
+        watcher.watch(&repo_path)?;
+
+        eprintln!("Watching {} for changes...", repo_path.display());
+
+        loop {
+            if let Some(change) = watcher.poll_changes() {
+                eprintln!("Change detected: {:?}", change);
+                if let Err(e) = self.process_change(change) {
+                    eprintln!("Error processing change: {}", e);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+    }
 }
 
 impl Default for CodeSift {

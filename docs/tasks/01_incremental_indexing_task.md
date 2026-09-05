@@ -24,11 +24,11 @@ Implement filesystem change detection to enable incremental re-indexing of repos
 - `src/repository.rs` - Add change detection
 
 ## Acceptance Criteria
-- [ ] Only changed files are re-parsed on modification
-- [ ] Deleted files are removed from index
-- [ ] Added files are indexed
-- [ ] Watch mode detects changes in real-time
-- [ ] Index size remains bounded over time
+- [x] Only changed files are re-parsed on modification
+- [x] Deleted files are removed from index
+- [x] Added files are indexed
+- [x] Watch mode detects changes in real-time
+- [x] Index size remains bounded over time
 
 ## Status
-- [ ] Not started
+- [x] Completed
