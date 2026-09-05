@@ -44,11 +44,23 @@ Extend CodeSift to support more programming languages: Go, Java, C/C++, and Type
 - `src/repository.rs` - Update extension mapping
 
 ## Acceptance Criteria
-- [ ] Go files are parsed and symbols extracted
-- [ ] Java files are parsed and symbols extracted
-- [ ] C/C++ files are parsed and symbols extracted
-- [ ] TypeScript/JSX works correctly
-- [ ] Tests pass for all languages
+- [x] Go files are parsed and symbols extracted
+- [x] Java files are parsed and symbols extracted
+- [x] C/C++ files are parsed and symbols extracted
+- [x] TypeScript/JSX works correctly
+- [x] Tests pass for all languages
 
 ## Status
-- [ ] Not started
+- [x] Completed
+
+## Implementation Notes
+- Language enum in types.rs already had Go, Java, C, Cpp variants
+- Added tree-sitter-go, tree-sitter-java, tree-sitter-c, tree-sitter-cpp to Cargo.toml
+- Updated parser.rs to handle new languages in parse() and extract_call()
+- Added `lang: Language` parameter through call chain to disambiguate same-named node kinds across languages
+- Added node kinds for:
+  - **Go**: `function_declaration`, `method_declaration`, `type_declaration`, `struct_type`, `interface_type`
+  - **Java**: `class_declaration`, `method_declaration`, `interface_declaration`, `field_declaration`
+  - **C/C++**: `function_definition`, `struct_specifier`, `class_specifier`, `enum_specifier`
+- C and C++ share tree-sitter-cpp parser (handles both)
+- Call expression extraction uses language guards to avoid false matches
