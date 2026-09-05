@@ -58,6 +58,7 @@ pub mod error_codes {
 pub struct Tool {
     pub name: String,
     pub description: String,
+    #[serde(rename = "inputSchema")]
     pub input_schema: Value,
 }
 
@@ -66,6 +67,7 @@ pub struct Tool {
 pub struct ToolResult {
     pub content: Vec<ContentBlock>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "isError")]
     pub is_error: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<ToolResultMeta>,

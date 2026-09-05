@@ -2,7 +2,7 @@
 
 use clap::{Parser, ValueEnum};
 use codesift::{mcp::JsonRpcRequest, CodeSift, McpServer, TokenBudget};
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead};
 
 #[derive(Parser, Debug)]
 #[command(name = "codesift")]
@@ -203,6 +203,18 @@ fn run_mcp_server(codesift: CodeSift) -> anyhow::Result<()> {
     let mut stdout = io::stdout();
     let mut server = McpServer::new(codesift);
 
+    let log_path = std::path::PathBuf::from("/tmp/codesift_mcp.log");
+    let mut log_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)?;
+
+    use std::io::Write;
+    writeln!(log_file, "=== MCP server started at {:?} ===", std::time::SystemTime::now())?;
+    log_file.flush()?;
+
+    eprintln!("MCP server started, waiting for requests on stdin");
+
     loop {
         for line in stdin.lock().lines() {
             let line = line?;
@@ -211,8 +223,16 @@ fn run_mcp_server(codesift: CodeSift) -> anyhow::Result<()> {
             }
 
             let request: JsonRpcRequest = match serde_json::from_str(&line) {
-                Ok(r) => r,
+                Ok(r) => {
+                    eprintln!("MCP request line: {}", line);
+                    writeln!(log_file, "REQUEST: {}", line)?;
+                    log_file.flush()?;
+                    r
+                }
                 Err(e) => {
+                    eprintln!("MCP parse error: {}", e);
+                    writeln!(log_file, "PARSE ERROR: {} on line: {}", e, line)?;
+                    log_file.flush()?;
                     let response = serde_json::json!({
                         "jsonrpc": "2.0",
                         "id": serde_json::Value::Null,
@@ -229,7 +249,11 @@ fn run_mcp_server(codesift: CodeSift) -> anyhow::Result<()> {
 
             let response = server.handle(request);
             if let Some(response) = response {
-                writeln!(stdout, "{}", serde_json::to_string(&response)?)?;
+                let resp_str = serde_json::to_string(&response).unwrap_or_default();
+                eprintln!("MCP response: {}", resp_str);
+                writeln!(log_file, "RESPONSE: {}", resp_str)?;
+                log_file.flush()?;
+                writeln!(stdout, "{}", resp_str)?;
                 stdout.flush()?;
             }
         }
