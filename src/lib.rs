@@ -4,6 +4,7 @@ pub use crate::context::{ContextFragment, ContextPlan};
 pub use crate::graph::ReferenceIndex;
 pub use crate::index::TokenBudget;
 pub use crate::mcp::McpServer;
+pub use crate::watcher::{FileChange, FsWatcher};
 pub mod context;
 pub mod error;
 pub mod graph;
@@ -14,6 +15,10 @@ pub mod ranking;
 pub mod repository;
 pub mod search;
 pub mod types;
+pub mod watcher;
+
+#[cfg(test)]
+pub mod watcher_tests;
 
 use crate::context::plan_context;
 use crate::error::Result;
@@ -21,7 +26,8 @@ use crate::index::{Index, LexicalMatch};
 use crate::parser::Parser;
 use crate::ranking::rank_candidates;
 use crate::search::{search, SearchMode, SearchQuery};
-use crate::types::{FileId, Relationship, Symbol, SymbolId};
+use crate::types::{FileEntry, FileId, Relationship, Symbol, SymbolId};
+
 
 /// Main CodeSift engine.
 #[derive(Clone)]
@@ -29,6 +35,7 @@ pub struct CodeSift {
     index: Index,
     parser: Parser,
     references: ReferenceIndex,
+    repo_path: Option<std::path::PathBuf>,
 }
 
 impl CodeSift {
@@ -38,14 +45,21 @@ impl CodeSift {
             index: Index::new(),
             parser: Parser::new(),
             references: ReferenceIndex::new(),
+            repo_path: None,
         }
     }
 
     /// Open and index a repository.
     pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self> {
-        let repo = repository::Repository::open(path)?;
+        let path = path.as_ref().to_path_buf();
+        let repo = repository::Repository::open(&path)?;
 
-        let mut codesift = Self::new();
+        let mut codesift = Self {
+            index: Index::new(),
+            parser: Parser::new(),
+            references: ReferenceIndex::new(),
+            repo_path: Some(path.clone()),
+        };
 
         // Index all files
         for file in repo.files() {
@@ -208,6 +222,119 @@ impl CodeSift {
     /// Get symbol count.
     pub fn symbol_count(&self) -> usize {
         self.index.symbol_count()
+    }
+
+    /// Process a file change event (for incremental indexing).
+    pub fn process_change(&mut self, change: FileChange) -> Result<()> {
+        let repo_path = self.repo_path.clone().ok_or_else(|| {
+            crate::error::Error::Index("No repository path set".to_string())
+        })?;
+
+        match change {
+            FileChange::Created(path) | FileChange::Modified(path) => {
+                self.reindex_file(&repo_path, &path)?;
+            }
+            FileChange::Deleted(path) => {
+                self.index.remove_file_by_path(&path);
+            }
+        }
+        Ok(())
+    }
+
+    /// Re-index a single file.
+    pub fn reindex_file(&mut self, repo_path: &std::path::Path, file_path: &std::path::Path) -> Result<()> {
+        // Read the file
+        let full_path = if file_path.is_absolute() {
+            file_path.to_path_buf()
+        } else {
+            repo_path.join(file_path)
+        };
+
+        // Check if file exists
+        if !full_path.exists() {
+            // File was deleted
+            self.index.remove_file_by_path(&full_path);
+            return Ok(());
+        }
+
+        // Detect language from extension
+        let ext = full_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let language = crate::types::Language::from_extension(ext);
+
+        // Read content
+        let content = std::fs::read(&full_path)?;
+
+        // Create file entry (use FileEntry::from_path for proper initialization)
+        let mut entry = FileEntry::from_path(full_path.clone())
+            .ok_or_else(|| crate::error::Error::FileNotFound(full_path.display().to_string()))?;
+        entry.is_binary = false;
+        entry.is_vendor = false;
+
+        // Update or add file
+        let file_id = if self.index.has_file(&full_path) {
+            self.index.remove_file_by_path(&full_path);
+            self.index.add_file(entry)
+        } else {
+            self.index.add_file(entry)
+        };
+
+        // Store content
+        self.index.store_content(file_id, content.clone());
+
+        // Parse and update symbols
+        if let Ok(parsed) = self.parser.parse(&content, language, file_id) {
+            // Remove old symbols and add new ones
+            // Note: references in parsed format are (SymbolId, String, Relationship)
+            // We only need the Relationship for index storage
+            self.index.update_file_symbols(
+                file_id,
+                parsed.symbols,
+                Vec::new(), // References stored separately in the reference index
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Re-index all files (full rebuild).
+    pub fn reindex(&mut self) -> Result<()> {
+        let repo_path = self.repo_path.as_ref().ok_or_else(|| {
+            crate::error::Error::Index("No repository path set".to_string())
+        })?;
+
+        let repo = repository::Repository::open(repo_path)?;
+
+        // Clear and rebuild
+        self.index = Index::new();
+        self.references = ReferenceIndex::new();
+
+        for file in repo.files() {
+            let file_id = self.index.add_file(file.clone());
+
+            if file.is_binary || file.is_vendor {
+                continue;
+            }
+
+            let content = repo.read_file(file_id)?;
+            self.index.store_content(file_id, content.clone());
+
+            if let Ok(parsed) = self.parser.parse(&content, file.language, file_id) {
+                for symbol in &parsed.symbols {
+                    let _ = self.index.add_symbol(symbol.clone());
+                }
+
+                for (sym_id, _, rel) in &parsed.references {
+                    self.index.add_reference(*sym_id, *sym_id, rel.clone());
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get the repository path.
+    pub fn repo_path(&self) -> Option<&std::path::Path> {
+        self.repo_path.as_deref()
     }
 }
 

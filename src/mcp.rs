@@ -130,7 +130,7 @@ impl McpServer {
         }
     }
 
-    fn handle_initialize(&mut self, params: Option<Value>) -> Result<Value, (i32, String)> {
+    fn handle_initialize(&mut self, _params: Option<Value>) -> Result<Value, (i32, String)> {
         self.initialized = true;
         Ok(serde_json::json!({
             "protocolVersion": "2024-11-05",

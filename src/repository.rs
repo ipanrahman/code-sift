@@ -11,7 +11,6 @@ pub struct Repository {
     root: PathBuf,
     files: HashMap<FileId, FileEntry>,
     paths: HashMap<PathBuf, FileId>,
-    ignored_patterns: Vec<String>,
 }
 
 impl Repository {
@@ -25,8 +24,7 @@ impl Repository {
             return Err(Error::Repository("path is not a directory".into()));
         }
 
-        let ignored_patterns = Self::load_gitignore(&root);
-        let files = Self::scan_directory(&root, &ignored_patterns)?;
+        let files = Self::scan_directory(&root)?;
 
         let mut paths: HashMap<PathBuf, FileId> = HashMap::new();
         for (id, entry) in &files {
@@ -37,29 +35,11 @@ impl Repository {
             root,
             files,
             paths,
-            ignored_patterns,
         })
     }
 
-    /// Load .gitignore patterns from the repository.
-    fn load_gitignore(root: &Path) -> Vec<String> {
-        let gitignore_path = root.join(".gitignore");
-        let mut patterns = Vec::new();
-
-        if let Ok(content) = std::fs::read_to_string(&gitignore_path) {
-            for line in content.lines() {
-                let line = line.trim();
-                if !line.is_empty() && !line.starts_with('#') {
-                    patterns.push(line.to_string());
-                }
-            }
-        }
-
-        patterns
-    }
-
     /// Scan directory for source files.
-    fn scan_directory(root: &Path, _ignored_patterns: &[String]) -> Result<HashMap<FileId, FileEntry>> {
+    fn scan_directory(root: &Path) -> Result<HashMap<FileId, FileEntry>> {
         let mut files = HashMap::new();
         let mut file_id_counter = 0u64;
 

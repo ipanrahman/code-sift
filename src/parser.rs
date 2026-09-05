@@ -92,7 +92,7 @@ impl Parser {
         calls: &mut Vec<CallReference>,
         next_id: &mut u64,
     ) {
-        let node_kind = node.kind();
+        let _node_kind = node.kind();
 
         // Extract call references
         if let Some(call_info) = self.extract_call(node, source, parent) {

@@ -33,6 +33,9 @@ clap = { version = "4.5", features = ["derive"] }
 anyhow = "1.0"
 thiserror = "1.0"
 
+# Filesystem watching (incremental indexing)
+notify = "6.1"
+
 [dev-dependencies]
 criterion = "0.5"
 tempfile = "3.12"

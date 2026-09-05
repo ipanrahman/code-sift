@@ -1,6 +1,5 @@
 //! Index structures for fast retrieval.
 
-use crate::error::{Error, Result};
 use crate::types::{
     FileEntry, FileId, Range, Relationship, Symbol, SymbolId,
 };
@@ -168,6 +167,95 @@ impl Index {
     /// Clear all content.
     pub fn clear_all_content(&mut self) {
         self.file_content.clear();
+    }
+
+    /// Remove a file and its associated data from the index.
+    pub fn remove_file(&mut self, file_id: FileId) -> Option<FileEntry> {
+        let entry = self.files.remove(&file_id)?;
+
+        // Remove from paths map
+        self.paths.remove(&entry.path);
+
+        // Remove symbols belonging to this file
+        if let Some(symbol_ids) = self.symbols_by_file.remove(&file_id) {
+            for sym_id in symbol_ids {
+                // Remove from symbols_by_name
+                if let Some(symbol) = self.symbols.remove(&sym_id) {
+                    if let Some(name_list) = self.symbols_by_name.get_mut(&symbol.name) {
+                        name_list.retain(|id| *id != sym_id);
+                        if name_list.is_empty() {
+                            self.symbols_by_name.remove(&symbol.name);
+                        }
+                    }
+                }
+                // Remove references involving this symbol
+                self.references.remove(&sym_id);
+                for refs in self.references.values_mut() {
+                    refs.retain(|(id, _)| *id != sym_id);
+                }
+            }
+        }
+
+        // Remove content
+        self.file_content.remove(&file_id);
+
+        Some(entry)
+    }
+
+    /// Remove a file by path.
+    pub fn remove_file_by_path(&mut self, path: &Path) -> Option<FileEntry> {
+        let file_id = self.paths.remove(path)?;
+        self.remove_file(file_id)
+    }
+
+    /// Update symbols for a file (re-index).
+    /// Removes old symbols for the file and adds new ones.
+    pub fn update_file_symbols(
+        &mut self,
+        file_id: FileId,
+        new_symbols: Vec<Symbol>,
+        new_references: Vec<(SymbolId, SymbolId, Relationship)>,
+    ) {
+        // Remove old symbols for this file
+        if let Some(old_symbol_ids) = self.symbols_by_file.remove(&file_id) {
+            for sym_id in old_symbol_ids {
+                if let Some(symbol) = self.symbols.remove(&sym_id) {
+                    if let Some(name_list) = self.symbols_by_name.get_mut(&symbol.name) {
+                        name_list.retain(|id| *id != sym_id);
+                        if name_list.is_empty() {
+                            self.symbols_by_name.remove(&symbol.name);
+                        }
+                    }
+                }
+                // Remove old references for this symbol
+                self.references.remove(&sym_id);
+                for refs in self.references.values_mut() {
+                    refs.retain(|(id, _)| *id != sym_id);
+                }
+            }
+        }
+
+        // Add new symbols
+        for symbol in new_symbols {
+            let sym_id = self.add_symbol(symbol);
+            // Update the symbol's ID reference in calls if needed
+            let _ = sym_id; // Symbol already has correct ID set
+        }
+
+        // Add new references
+        for (from_id, to_id, rel) in new_references {
+            self.add_reference(from_id, to_id, rel);
+        }
+    }
+
+    /// Get all file paths in the index.
+    pub fn file_paths(&self) -> impl Iterator<Item = &PathBuf> {
+        self.paths.keys()
+    }
+
+    /// Check if a file path is in the index.
+    pub fn has_file(&self, path: &Path) -> bool {
+        self.paths.contains_key(path)
     }
 }
 

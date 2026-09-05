@@ -1,6 +1,6 @@
 //! Reference index for tracking code relationships.
 
-use crate::types::{FileId, Relationship, SymbolId};
+use crate::types::{Relationship, SymbolId};
 use hashbrown::HashMap;
 
 /// Reference index tracking symbol relationships.
