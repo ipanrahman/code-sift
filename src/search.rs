@@ -6,10 +6,9 @@ use crate::types::{FileId, Range};
 use rayon::prelude::*;
 
 /// Search mode for lexical queries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchMode {
     /// Match exact text.
-    #[default]
     Exact,
     /// Match as regex pattern.
     Regex,

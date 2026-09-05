@@ -72,6 +72,8 @@ enum OutputFormat {
 }
 
 fn main() -> anyhow::Result<()> {
+    env_logger::init();
+
     let args = Args::parse();
 
     // Initialize CodeSift
