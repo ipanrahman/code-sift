@@ -9,6 +9,7 @@ mod tests {
     use tempfile::TempDir;
 
     struct RepoBuilder {
+        #[allow(dead_code)]
         temp: TempDir,
         path: std::path::PathBuf,
     }
