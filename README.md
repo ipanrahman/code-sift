@@ -110,6 +110,18 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 | Java | Planned |
 | C/C++ | Planned |
 
+## Feature Flags
+
+The project uses optional feature flags. By default, CodeSift builds without the `semantic` feature:
+
+```bash
+# Build without semantic (faster, no bincode dependency)
+cargo build
+
+# Build with semantic search (requires bincode for index persistence)
+cargo build --features semantic
+```
+
 ## Performance
 
 | Metric | Target |
@@ -124,14 +136,18 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 # Build
 cargo build
 
-# Test
-cargo test
-
-# Benchmark
-cargo bench
-
 # Release build
 cargo build --release
+
+# Using Makefile
+make build
+make release
+make bin       # build release and copy binary to bin/
+make test      # run all tests
+make clippy    # run clippy linter
+make fmt       # format code
+make check     # run build + clippy + test
+make clean     # remove build artifacts
 ```
 
 ## License
