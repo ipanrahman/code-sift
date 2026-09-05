@@ -76,7 +76,7 @@ impl Storage {
             .as_secs();
 
         #[cfg(feature = "semantic")]
-        let has_semantic_index = {
+        let _has_semantic_index = {
             let semantic_bytes = crate::retrieval::RetrievalEngine::default()
                 .get_semantic_index()
                 .serialize();
@@ -113,9 +113,14 @@ impl Storage {
         // Save index data
         let index_data = SerializableIndexData {
             files: index.files().cloned().collect(),
-            file_paths: index.files().map(|f| (f.path.to_string_lossy().to_string(), f.id.0)).collect(),
+            file_paths: index
+                .files()
+                .map(|f| (f.path.to_string_lossy().to_string(), f.id.0))
+                .collect(),
             symbols: index.symbols().cloned().collect(),
-            references: index.all_references().iter()
+            references: index
+                .all_references()
+                .iter()
                 .map(|(from, to, rel)| (from.0, to.0, *rel as u8))
                 .collect(),
             next_file_id: index.next_file_id(),
@@ -131,14 +136,16 @@ impl Storage {
 
     /// Load the index from disk.
     pub fn load(&self) -> std::io::Result<(Index, crate::graph::ReferenceIndex)> {
-        let manifest: Manifest = serde_json::from_str(
-            &fs::read_to_string(self.cache_dir.join(MANIFEST_FILE))?,
-        )?;
+        let manifest: Manifest =
+            serde_json::from_str(&fs::read_to_string(self.cache_dir.join(MANIFEST_FILE))?)?;
 
         if manifest.version != CACHE_VERSION {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Cache version mismatch: expected {}, got {}", CACHE_VERSION, manifest.version),
+                format!(
+                    "Cache version mismatch: expected {}, got {}",
+                    CACHE_VERSION, manifest.version
+                ),
             ));
         }
 
@@ -195,9 +202,9 @@ impl Storage {
 
     /// Get cached file hashes for invalidation checking.
     pub fn get_file_hashes(&self) -> std::io::Result<HashMap<String, (u64, u64)>> {
-        let hashes: Vec<FileHash> = serde_json::from_str(
-            &fs::read_to_string(self.cache_dir.join(HASHES_FILE))?,
-        ).unwrap_or_default();
+        let hashes: Vec<FileHash> =
+            serde_json::from_str(&fs::read_to_string(self.cache_dir.join(HASHES_FILE))?)
+                .unwrap_or_default();
 
         Ok(hashes
             .into_iter()
@@ -241,13 +248,10 @@ fn deserialize_data(reader: &mut impl Read) -> std::io::Result<SerializableIndex
 
     let mut json_bytes = vec![0u8; len];
     reader.read_exact(&mut json_bytes)?;
-    let json = String::from_utf8(json_bytes).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-    })?;
+    let json = String::from_utf8(json_bytes)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-    serde_json::from_str(&json).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-    })
+    serde_json::from_str(&json).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
 /// Simple file hash using modification time and size (fast).

@@ -2,9 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        CodeSift, Relationship,
-    };
+    use crate::{CodeSift, Relationship};
     use std::fs;
     use tempfile::TempDir;
 
@@ -132,19 +130,16 @@ fn main() { helper(); }
                 .query("helper")
                 .expect_definition(true)
                 .expect_references(true),
-
             Case::new("definition_only")
                 .with_files(vec![("b.rs", r#"fn unused() {}"#)])
                 .query("unused")
                 .expect_definition(true)
                 .expect_references(false),
-
             Case::new("no_match")
                 .with_files(vec![("c.rs", r#"fn main() {}"#)])
                 .query("nonexistent")
                 .expect_definition(false)
                 .expect_references(false),
-
             Case::new("cross_file_call")
                 .with_files(vec![
                     ("lib.rs", r#"pub fn shared() {}"#),
@@ -226,9 +221,12 @@ fn callee() {}
     fn test_definition_and_reference_in_same_file() {
         // Arrange
         let builder = RepoBuilder::new();
-        builder.write("main.rs", r#"fn target() {}
+        builder.write(
+            "main.rs",
+            r#"fn target() {}
 fn source() { target(); }
-"#);
+"#,
+        );
         let codesift = builder.open();
 
         // Act

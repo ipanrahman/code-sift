@@ -46,11 +46,17 @@ pub fn plan_context(
     let mut total_files: usize = 0;
     let mut files_used: std::collections::HashSet<FileId> = std::collections::HashSet::new();
     // Use (file_id, start_byte) as unique identifier to avoid duplicates
-    let mut ranges_used: std::collections::HashSet<(FileId, usize)> = std::collections::HashSet::new();
+    let mut ranges_used: std::collections::HashSet<(FileId, usize)> =
+        std::collections::HashSet::new();
 
     // Sort by score descending
     let mut candidates = candidates;
-    candidates.sort_by(|a, b| b.score.total.partial_cmp(&a.score.total).unwrap_or(std::cmp::Ordering::Equal));
+    candidates.sort_by(|a, b| {
+        b.score
+            .total
+            .partial_cmp(&a.score.total)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     for candidate in candidates {
         // Check budget constraints
@@ -163,7 +169,7 @@ pub fn merge_ranges(ranges: &[(FileId, Range)]) -> Vec<(FileId, Range)> {
 /// Estimate token count (rough approximation).
 pub fn estimate_tokens(text: &str) -> usize {
     // Simple heuristic: ~4 chars per token on average
-    (text.len() + 3) / 4
+    text.len().div_ceil(4)
 }
 
 /// Try to create a more compact version if full content doesn't fit.
@@ -190,5 +196,9 @@ fn try_compact(content: &str, max_tokens: usize) -> Option<String> {
     }
 
     let compact = chars[..cut].iter().collect::<String>();
-    Some(format!("{}...\n[{} more lines]", compact, chars[cut..].iter().filter(|c| **c == '\n').count()))
+    Some(format!(
+        "{}...\n[{} more lines]",
+        compact,
+        chars[cut..].iter().filter(|c| **c == '\n').count()
+    ))
 }

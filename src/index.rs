@@ -1,8 +1,6 @@
 //! Index structures for fast retrieval.
 
-use crate::types::{
-    FileEntry, FileId, Range, Relationship, Symbol, SymbolId,
-};
+use crate::types::{FileEntry, FileId, Range, Relationship, Symbol, SymbolId};
 use hashbrown::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -131,11 +129,7 @@ impl Index {
     pub fn symbols_in_file(&self, file_id: FileId) -> Vec<&Symbol> {
         self.symbols_by_file
             .get(&file_id)
-            .map(|ids| {
-                ids.iter()
-                    .filter_map(|id| self.symbols.get(id))
-                    .collect()
-            })
+            .map(|ids| ids.iter().filter_map(|id| self.symbols.get(id)).collect())
             .unwrap_or_default()
     }
 
@@ -146,7 +140,10 @@ impl Index {
 
     /// Get references from a symbol.
     pub fn get_references(&self, id: SymbolId) -> &[(SymbolId, Relationship)] {
-        self.references.get(&id).map(|v| v.as_slice()).unwrap_or(&[])
+        self.references
+            .get(&id)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Store file content.
@@ -321,10 +318,9 @@ impl Index {
 
     /// Get all references for serialization.
     pub fn all_references(&self) -> Vec<(SymbolId, SymbolId, Relationship)> {
-        self.references.iter()
-            .flat_map(|(from, refs)| {
-                refs.iter().map(move |(to, rel)| (*from, *to, *rel))
-            })
+        self.references
+            .iter()
+            .flat_map(|(from, refs)| refs.iter().map(move |(to, rel)| (*from, *to, *rel)))
             .collect()
     }
 }

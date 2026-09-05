@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
 use codesift::CodeSift;
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 
 fn benchmark_memory_usage(c: &mut Criterion) {
     let mut group = c.benchmark_group("memory_usage");

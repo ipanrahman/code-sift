@@ -96,7 +96,11 @@ fn run_cli(codesift: CodeSift, args: Args) -> anyhow::Result<()> {
         .with_symbols(args.max_symbols);
 
     if args.verbose {
-        eprintln!("Indexed {} files, {} symbols", codesift.file_count(), codesift.symbol_count());
+        eprintln!(
+            "Indexed {} files, {} symbols",
+            codesift.file_count(),
+            codesift.symbol_count()
+        );
     }
 
     let query = args.query.unwrap_or_default();
@@ -161,7 +165,11 @@ fn run_cli(codesift: CodeSift, args: Args) -> anyhow::Result<()> {
 
             for frag in &plan.fragments {
                 if let Some(file) = codesift.get_file(frag.file_id) {
-                    println!("=== {}:{} ===", file.path.to_string_lossy(), frag.range.start_line);
+                    println!(
+                        "=== {}:{} ===",
+                        file.path.to_string_lossy(),
+                        frag.range.start_line
+                    );
                     if let Some(name) = &frag.symbol_name {
                         println!("Symbol: {}", name);
                     }
@@ -173,7 +181,11 @@ fn run_cli(codesift: CodeSift, args: Args) -> anyhow::Result<()> {
     }
 
     if args.verbose {
-        eprintln!("Indexed {} files, {} symbols", codesift.file_count(), codesift.symbol_count());
+        eprintln!(
+            "Indexed {} files, {} symbols",
+            codesift.file_count(),
+            codesift.symbol_count()
+        );
     }
 
     Ok(())
@@ -189,34 +201,37 @@ fn run_mcp_server(codesift: CodeSift) -> anyhow::Result<()> {
     let mut stdout = io::stdout();
     let mut server = McpServer::new(codesift);
 
-    for line in stdin.lock().lines() {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        // Parse JSON-RPC request
-        let request: JsonRpcRequest = match serde_json::from_str(&line) {
-            Ok(r) => r,
-            Err(e) => {
-                let response = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": serde_json::Value::Null,
-                    "error": {
-                        "code": -32700,
-                        "message": format!("Parse error: {}", e)
-                    }
-                });
-                writeln!(stdout, "{}", response)?;
-                stdout.flush()?;
+    loop {
+        for line in stdin.lock().lines() {
+            let line = line?;
+            if line.trim().is_empty() {
                 continue;
             }
-        };
 
-        let response = server.handle(request);
-        writeln!(stdout, "{}", serde_json::to_string(&response)?)?;
-        stdout.flush()?;
+            let request: JsonRpcRequest = match serde_json::from_str(&line) {
+                Ok(r) => r,
+                Err(e) => {
+                    let response = serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": serde_json::Value::Null,
+                        "error": {
+                            "code": -32700,
+                            "message": format!("Parse error: {}", e)
+                        }
+                    });
+                    writeln!(stdout, "{}", response)?;
+                    stdout.flush()?;
+                    continue;
+                }
+            };
+
+            let response = server.handle(request);
+            if let Some(response) = response {
+                writeln!(stdout, "{}", serde_json::to_string(&response)?)?;
+                stdout.flush()?;
+            }
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
-
-    Ok(())
 }

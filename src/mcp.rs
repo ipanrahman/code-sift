@@ -16,6 +16,7 @@ const DEFAULT_TIMEOUT_MS: u64 = 30000;
 #[derive(Debug, Deserialize)]
 pub struct JsonRpcRequest {
     pub jsonrpc: String,
+    #[serde(default)]
     pub id: Value,
     pub method: String,
     #[serde(default)]
@@ -190,25 +191,27 @@ impl McpServer {
         self.timeout_ms = ms;
     }
 
-    /// Process a JSON-RPC request and return response.
-    pub fn handle(&mut self, request: JsonRpcRequest) -> JsonRpcResponse {
-        let id = request.id.clone();
+    /// Process a JSON-RPC request and return response. Returns None for
+    /// notifications (requests without an `id`), which must not be answered.
+    pub fn handle(&mut self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
+        let is_notification = request.id.is_null();
 
-        // Validate JSON-RPC version
         if request.jsonrpc != "2.0" {
-            return JsonRpcResponse {
+            if is_notification {
+                return None;
+            }
+            return Some(JsonRpcResponse {
                 jsonrpc: "2.0".into(),
-                id,
+                id: request.id,
                 result: None,
                 error: Some(JsonRpcError {
                     code: error_codes::INVALID_REQUEST,
                     message: "Invalid JSON-RPC version".into(),
                     data: None,
                 }),
-            };
+            });
         }
 
-        // Handle methods
         let result = match request.method.as_str() {
             "initialize" => self.handle_initialize(request.params),
             "tools/list" => self.handle_tools_list(),
@@ -218,26 +221,33 @@ impl McpServer {
             "health" => self.handle_health(),
             "session/status" => self.handle_session_status(),
             "workspace/info" => self.handle_workspace_info(request.params),
-            _ => Err((error_codes::METHOD_NOT_FOUND, format!("Unknown method: {}", request.method))),
+            _ => Err((
+                error_codes::METHOD_NOT_FOUND,
+                format!("Unknown method: {}", request.method),
+            )),
         };
 
+        if is_notification {
+            return None;
+        }
+
         match result {
-            Ok(value) => JsonRpcResponse {
+            Ok(value) => Some(JsonRpcResponse {
                 jsonrpc: "2.0".into(),
-                id,
+                id: request.id,
                 result: Some(value),
                 error: None,
-            },
-            Err((code, msg)) => JsonRpcResponse {
+            }),
+            Err((code, msg)) => Some(JsonRpcResponse {
                 jsonrpc: "2.0".into(),
-                id,
+                id: request.id,
                 result: None,
                 error: Some(JsonRpcError {
                     code,
                     message: msg,
                     data: None,
                 }),
-            },
+            }),
         }
     }
 
@@ -251,10 +261,13 @@ impl McpServer {
 
         self.initialized = true;
         self.session = Some(Session {
-            id: format!("session-{}", std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis()),
+            id: format!(
+                "session-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis()
+            ),
             workspace: None,
             created_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -286,11 +299,13 @@ impl McpServer {
     fn handle_tools_call(&mut self, params: Option<Value>) -> Result<Value, (i32, String)> {
         let params = params.ok_or((error_codes::INVALID_PARAMS, "Missing params".into()))?;
 
-        let name = params.get("name")
+        let name = params
+            .get("name")
             .and_then(|v| v.as_str())
             .ok_or((error_codes::INVALID_PARAMS, "Missing 'name' param".into()))?;
 
-        let arguments = params.get("arguments")
+        let arguments = params
+            .get("arguments")
             .and_then(|v| v.as_object())
             .map(|m| serde_json::Value::Object(m.clone()))
             .unwrap_or(serde_json::Value::Null);
@@ -307,12 +322,18 @@ impl McpServer {
         // Check if cancelled
         if self.cancellation_token.is_cancelled() {
             self.cancellation_token.reset();
-            return Err((error_codes::REQUEST_CANCELLED, "Request was cancelled".into()));
+            return Err((
+                error_codes::REQUEST_CANCELLED,
+                "Request was cancelled".into(),
+            ));
         }
 
         // Check timeout
         if start.elapsed().as_millis() as u64 > self.timeout_ms {
-            return Err((error_codes::REQUEST_TIMEOUT, format!("Request timed out after {}ms", self.timeout_ms)));
+            return Err((
+                error_codes::REQUEST_TIMEOUT,
+                format!("Request timed out after {}ms", self.timeout_ms),
+            ));
         }
 
         // Add timing info
@@ -506,13 +527,20 @@ impl McpServer {
             Some(q) => q,
             None => return self.error("Missing 'query' argument"),
         };
-        let max_tokens = args.get("max_tokens").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
+        let max_tokens = args
+            .get("max_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(2000) as usize;
 
         let budget = TokenBudget::new(max_tokens);
 
         match self.codesift.search(query, Some(budget)) {
             Ok(matches) => {
-                let file_count = matches.iter().map(|m| m.file_id).collect::<std::collections::HashSet<_>>().len();
+                let file_count = matches
+                    .iter()
+                    .map(|m| m.file_id)
+                    .collect::<std::collections::HashSet<_>>()
+                    .len();
                 let summary = format!("Found {} matches in {} files", matches.len(), file_count);
                 ToolResult {
                     content: vec![ContentBlock::Text { text: summary }],
@@ -568,7 +596,10 @@ impl McpServer {
             Some(q) => q,
             None => return self.error("Missing 'query' argument"),
         };
-        let max_tokens = args.get("max_tokens").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
+        let max_tokens = args
+            .get("max_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(2000) as usize;
         let max_files = args.get("max_files").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
 
         let budget = TokenBudget::new(max_tokens).with_files(max_files);
@@ -615,7 +646,12 @@ impl McpServer {
             } else {
                 for (caller_id, d) in callers {
                     if let Some(caller) = self.codesift.get_symbol(caller_id) {
-                        output.push_str(&format!("{} depth {}: {}\n", "  ".repeat(d), d, caller.name));
+                        output.push_str(&format!(
+                            "{} depth {}: {}\n",
+                            "  ".repeat(d),
+                            d,
+                            caller.name
+                        ));
                     }
                 }
             }
@@ -654,7 +690,12 @@ impl McpServer {
             } else {
                 for (callee_id, d) in callees {
                     if let Some(callee) = self.codesift.get_symbol(callee_id) {
-                        output.push_str(&format!("{} depth {}: {}\n", "  ".repeat(d), d, callee.name));
+                        output.push_str(&format!(
+                            "{} depth {}: {}\n",
+                            "  ".repeat(d),
+                            d,
+                            callee.name
+                        ));
                     }
                 }
             }
@@ -692,7 +733,13 @@ impl McpServer {
             let content = source.unwrap_or_default();
             ToolResult {
                 content: vec![ContentBlock::Text {
-                    text: format!("{}:{}:{}\n\n{}", file.path.display(), sym.range.start_line, sym.range.end_line, content),
+                    text: format!(
+                        "{}:{}:{}\n\n{}",
+                        file.path.display(),
+                        sym.range.start_line,
+                        sym.range.end_line,
+                        content
+                    ),
                 }],
                 is_error: None,
                 meta: None,
@@ -723,7 +770,12 @@ impl McpServer {
         let mut output = format!("References to '{}':\n", name);
         for sym in &symbols {
             if let Some(file) = self.codesift.get_file(sym.file_id) {
-                output.push_str(&format!("- {}:{}:{}\n", file.path.display(), sym.range.start_line, sym.range.end_line));
+                output.push_str(&format!(
+                    "- {}:{}:{}\n",
+                    file.path.display(),
+                    sym.range.start_line,
+                    sym.range.end_line
+                ));
             }
         }
 
@@ -746,8 +798,15 @@ impl McpServer {
 
     fn format_context_plan(codesift: &CodeSift, plan: &ContextPlan) -> String {
         let mut output = String::new();
-        output.push_str(&format!("Context ({} tokens / {} budget)\n", plan.total_tokens, plan.budget.max_tokens));
-        output.push_str(&format!("Files: {}, Symbols: {}\n\n", plan.total_files, plan.len()));
+        output.push_str(&format!(
+            "Context ({} tokens / {} budget)\n",
+            plan.total_tokens, plan.budget.max_tokens
+        ));
+        output.push_str(&format!(
+            "Files: {}, Symbols: {}\n\n",
+            plan.total_files,
+            plan.len()
+        ));
 
         let mut files: std::collections::HashMap<String, Vec<&crate::ContextFragment>> =
             std::collections::HashMap::new();
@@ -763,7 +822,10 @@ impl McpServer {
             output.push_str(&format!("=== {} ===\n", path));
             for frag in frags {
                 if let Some(name) = &frag.symbol_name {
-                    output.push_str(&format!("[{}:{}] {}\n", frag.range.start_line, frag.range.end_line, name));
+                    output.push_str(&format!(
+                        "[{}:{}] {}\n",
+                        frag.range.start_line, frag.range.end_line, name
+                    ));
                 }
                 output.push_str(&format!("{}\n", frag.content.trim()));
             }

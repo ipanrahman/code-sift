@@ -287,7 +287,12 @@ impl Relationship {
     pub fn is_directed(&self) -> bool {
         matches!(
             self,
-            Self::Calls | Self::CalleeOf | Self::Implements | Self::ExtendedBy | Self::Imports | Self::Exports
+            Self::Calls
+                | Self::CalleeOf
+                | Self::Implements
+                | Self::ExtendedBy
+                | Self::Imports
+                | Self::Exports
         )
     }
 }

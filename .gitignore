@@ -24,3 +24,7 @@ Thumbs.db
 *.log
 .codesift/
 .codesift_backup/
+
+# Binary
+bin/
+

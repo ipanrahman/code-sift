@@ -60,7 +60,12 @@ pub fn rank_candidates(
         })
         .collect();
 
-    ranked.sort_by(|a, b| b.score.total.partial_cmp(&a.score.total).unwrap_or(std::cmp::Ordering::Equal));
+    ranked.sort_by(|a, b| {
+        b.score
+            .total
+            .partial_cmp(&a.score.total)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     ranked
 }
@@ -102,11 +107,23 @@ fn compute_score(
     }
 
     // Semantic score: scale from [0,1] to [0, 100]
-    score.semantic = semantic_score * 100.0;
+    // Boost semantic matches to ensure they rank above low-structural lexical matches
+    let semantic_boost = if symbol.name.starts_with("semantic:") {
+        semantic_score * 150.0
+    } else {
+        semantic_score * 100.0
+    };
+    score.semantic = semantic_boost;
 
     // Calculate total
-    score.total = score.symbol_match + score.definition + score.reference
-        + score.caller + score.callee + score.test + score.lexical + score.semantic;
+    score.total = score.symbol_match
+        + score.definition
+        + score.reference
+        + score.caller
+        + score.callee
+        + score.test
+        + score.lexical
+        + score.semantic;
 
     score
 }

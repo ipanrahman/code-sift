@@ -16,9 +16,10 @@ pub struct Repository {
 impl Repository {
     /// Open and scan a repository at the given path.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let root = path.as_ref().canonicalize().map_err(|e| {
-            Error::Repository(format!("failed to canonicalize path: {}", e))
-        })?;
+        let root = path
+            .as_ref()
+            .canonicalize()
+            .map_err(|e| Error::Repository(format!("failed to canonicalize path: {}", e)))?;
 
         if !root.is_dir() {
             return Err(Error::Repository("path is not a directory".into()));
@@ -31,11 +32,7 @@ impl Repository {
             paths.insert(entry.path.clone(), *id);
         }
 
-        Ok(Self {
-            root,
-            files,
-            paths,
-        })
+        Ok(Self { root, files, paths })
     }
 
     /// Scan directory for source files.
@@ -43,8 +40,21 @@ impl Repository {
         let mut files = HashMap::new();
         let mut file_id_counter = 0u64;
 
-        let excluded_dirs = ["target", "node_modules", "dist", "build", ".git", ".svn",
-            "__pycache__", ".next", ".nuxt", ".cache", ".parcel-cache", "coverage", ".turbo"];
+        let excluded_dirs = [
+            "target",
+            "node_modules",
+            "dist",
+            "build",
+            ".git",
+            ".svn",
+            "__pycache__",
+            ".next",
+            ".nuxt",
+            ".cache",
+            ".parcel-cache",
+            "coverage",
+            ".turbo",
+        ];
 
         let walker = WalkBuilder::new(root)
             .hidden(true)
@@ -86,19 +96,15 @@ impl Repository {
             };
 
             // Mark vendor files
-            if path.components().any(|c| {
-                c.as_os_str()
-                    .to_string_lossy()
-                    .contains("vendor")
-            }) {
+            if path
+                .components()
+                .any(|c| c.as_os_str().to_string_lossy().contains("vendor"))
+            {
                 file_entry.is_vendor = true;
             }
 
             // Mark generated files
-            let file_name = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if file_name.ends_with(".gen.rs")
                 || file_name.ends_with(".pb.rs")
                 || file_name.contains(".generated.")
@@ -146,15 +152,17 @@ impl Repository {
             .get(&id)
             .ok_or_else(|| Error::FileNotFound(format!("{:?}", id)))?;
 
-        std::fs::read(&entry.path).map_err(|e| {
-            Error::Io(e)
-        })
+        std::fs::read(&entry.path).map_err(|e| Error::Io(e))
     }
 
     /// Get relative path from root.
     pub fn relative_path(&self, id: FileId) -> Option<PathBuf> {
         let entry = self.files.get(&id)?;
-        entry.path.strip_prefix(&self.root).ok().map(|p| p.to_path_buf())
+        entry
+            .path
+            .strip_prefix(&self.root)
+            .ok()
+            .map(|p| p.to_path_buf())
     }
 }
 

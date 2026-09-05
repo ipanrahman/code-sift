@@ -22,7 +22,9 @@ mod tests {
         let new_file = path.join("new_file.rs");
         fs::write(&new_file, "struct Foo {}\n").unwrap();
 
-        codesift.process_change(FileChange::Created(new_file)).unwrap();
+        codesift
+            .process_change(FileChange::Created(new_file))
+            .unwrap();
 
         // Should have more symbols now
         assert!(codesift.symbol_count() >= initial_count);
@@ -41,7 +43,9 @@ mod tests {
         // Modify the file
         fs::write(&file_path, "fn modified() {}\nfn another() {}\n").unwrap();
 
-        codesift.process_change(FileChange::Modified(file_path)).unwrap();
+        codesift
+            .process_change(FileChange::Modified(file_path))
+            .unwrap();
 
         // Should still work after modification
         assert!(codesift.symbol_count() >= 1);
@@ -61,7 +65,9 @@ mod tests {
         // Delete the file
         fs::remove_file(&file_path).unwrap();
 
-        codesift.process_change(FileChange::Deleted(file_path)).unwrap();
+        codesift
+            .process_change(FileChange::Deleted(file_path))
+            .unwrap();
 
         // File count should decrease
         assert!(codesift.file_count() < initial_count);
@@ -103,7 +109,11 @@ mod tests {
         watcher.watch(&path).unwrap();
 
         // Simulate a modification event from the watcher
-        fs::write(&file_path, "fn watch() {}\nfn extra() {}\nfn another() {}\n").unwrap();
+        fs::write(
+            &file_path,
+            "fn watch() {}\nfn extra() {}\nfn another() {}\n",
+        )
+        .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(500));
 
         if let Some(change) = watcher.poll_changes() {

@@ -40,7 +40,10 @@ impl ReferenceIndex {
 
     /// Get symbols called by this symbol.
     pub fn get_callees(&self, id: SymbolId) -> &[SymbolId] {
-        self.call_graph.get(&id).map(|v| v.as_slice()).unwrap_or(&[])
+        self.call_graph
+            .get(&id)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Get symbols that call this symbol.

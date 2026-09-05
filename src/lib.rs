@@ -20,14 +20,14 @@ pub mod types;
 pub mod watcher;
 
 #[cfg(feature = "semantic")]
-pub mod semantic;
-#[cfg(feature = "semantic")]
 pub mod retrieval;
+#[cfg(feature = "semantic")]
+pub mod semantic;
 
 #[cfg(test)]
-pub mod watcher_tests;
-#[cfg(test)]
 pub mod reference_tests;
+#[cfg(test)]
+pub mod watcher_tests;
 
 use crate::context::plan_context;
 use crate::error::Result;
@@ -36,7 +36,6 @@ use crate::parser::Parser;
 use crate::ranking::rank_candidates;
 use crate::search::{search, SearchMode, SearchQuery};
 use crate::types::{FileEntry, FileId, Relationship, Symbol, SymbolId};
-
 
 /// Main CodeSift engine.
 pub struct CodeSift {
@@ -127,13 +126,14 @@ impl CodeSift {
 
     /// Save index to cache for faster startup.
     pub fn save_cache(&self) -> Result<()> {
-        let path = self.repo_path.as_ref().ok_or_else(|| {
-            crate::error::Error::Index("No repository path set".to_string())
-        })?;
+        let path = self
+            .repo_path
+            .as_ref()
+            .ok_or_else(|| crate::error::Error::Index("No repository path set".to_string()))?;
         let storage = Storage::new(path);
-        storage.save(&self.index, path).map_err(|e| {
-            crate::error::Error::Index(format!("Failed to save cache: {}", e))
-        })
+        storage
+            .save(&self.index, path)
+            .map_err(|e| crate::error::Error::Index(format!("Failed to save cache: {}", e)))
     }
 
     /// Open repository, using cache if available and valid.
@@ -172,7 +172,7 @@ impl CodeSift {
                     #[cfg(feature = "semantic")]
                     {
                         if let Ok(Some(semantic_index)) = storage.load_semantic_index() {
-                            let mut engine = codesift.retrieval_engine;
+                            let engine = codesift.retrieval_engine;
                             engine.build_index_from(semantic_index);
                             codesift.retrieval_engine = engine;
                         } else {
@@ -210,7 +210,11 @@ impl CodeSift {
 
     /// Search with semantic/AI understanding (requires semantic feature).
     #[cfg(feature = "semantic")]
-    pub fn semantic_search(&self, query: &str, budget: Option<TokenBudget>) -> Vec<retrieval::RetrievalResult> {
+    pub fn semantic_search(
+        &self,
+        query: &str,
+        budget: Option<TokenBudget>,
+    ) -> Vec<retrieval::RetrievalResult> {
         let budget = budget.unwrap_or_default();
         self.retrieval_engine.search(query, &self.index, &budget)
     }
@@ -273,11 +277,7 @@ impl CodeSift {
     }
 
     /// Plan context for an agent query.
-    pub fn plan_context(
-        &self,
-        query: &str,
-        budget: Option<TokenBudget>,
-    ) -> Result<ContextPlan> {
+    pub fn plan_context(&self, query: &str, budget: Option<TokenBudget>) -> Result<ContextPlan> {
         let budget = budget.unwrap_or_default();
 
         // Step 1: Find candidates via symbol search and lexical search
@@ -356,9 +356,10 @@ impl CodeSift {
 
     /// Process a file change event (for incremental indexing).
     pub fn process_change(&mut self, change: FileChange) -> Result<()> {
-        let repo_path = self.repo_path.clone().ok_or_else(|| {
-            crate::error::Error::Index("No repository path set".to_string())
-        })?;
+        let repo_path = self
+            .repo_path
+            .clone()
+            .ok_or_else(|| crate::error::Error::Index("No repository path set".to_string()))?;
 
         match change {
             FileChange::Created(path) | FileChange::Modified(path) => {
@@ -372,7 +373,11 @@ impl CodeSift {
     }
 
     /// Re-index a single file.
-    pub fn reindex_file(&mut self, repo_path: &std::path::Path, file_path: &std::path::Path) -> Result<()> {
+    pub fn reindex_file(
+        &mut self,
+        repo_path: &std::path::Path,
+        file_path: &std::path::Path,
+    ) -> Result<()> {
         // Read the file
         let full_path = if file_path.is_absolute() {
             file_path.to_path_buf()
@@ -428,9 +433,10 @@ impl CodeSift {
 
     /// Re-index all files (full rebuild).
     pub fn reindex(&mut self) -> Result<()> {
-        let repo_path = self.repo_path.as_ref().ok_or_else(|| {
-            crate::error::Error::Index("No repository path set".to_string())
-        })?;
+        let repo_path = self
+            .repo_path
+            .as_ref()
+            .ok_or_else(|| crate::error::Error::Index("No repository path set".to_string()))?;
 
         let repo = repository::Repository::open(repo_path)?;
 
@@ -472,9 +478,15 @@ impl CodeSift {
 
         self.resolve_all_references(&all_calls, &all_parsed_symbols);
 
-        // Rebuild semantic index
+        // Load semantic index from cache if available, then rebuild index
         #[cfg(feature = "semantic")]
         {
+            let storage = crate::storage::Storage::new(&self.repo_path.as_ref().unwrap());
+            if storage.cache_exists() {
+                if let Ok(Some(semantic_index)) = storage.load_semantic_index() {
+                    self.retrieval_engine.build_index_from(semantic_index);
+                }
+            }
             self.retrieval_engine.build_index(&self.index);
         }
 
@@ -494,7 +506,8 @@ impl CodeSift {
         _parsed_symbols: &[(SymbolId, String)],
     ) {
         // Build global symbol name -> SymbolId map
-        let mut global_index: std::collections::HashMap<String, Vec<SymbolId>> = std::collections::HashMap::new();
+        let mut global_index: std::collections::HashMap<String, Vec<SymbolId>> =
+            std::collections::HashMap::new();
         for symbol in self.index.symbols() {
             global_index
                 .entry(symbol.name.clone())
@@ -510,9 +523,15 @@ impl CodeSift {
                 // Prefer same-file resolution
                 let target_id = if let Some(caller_id) = call.caller {
                     if let Some(caller_symbol) = self.index.get_symbol(caller_id) {
-                        callee_ids.iter().find_map(|&id| {
-                            self.index.get_symbol(id).filter(|s| s.file_id == caller_symbol.file_id).map(|_| id)
-                        }).or_else(|| callee_ids.first().copied())
+                        callee_ids
+                            .iter()
+                            .find_map(|&id| {
+                                self.index
+                                    .get_symbol(id)
+                                    .filter(|s| s.file_id == caller_symbol.file_id)
+                                    .map(|_| id)
+                            })
+                            .or_else(|| callee_ids.first().copied())
                     } else {
                         callee_ids.first().copied()
                     }
@@ -522,11 +541,8 @@ impl CodeSift {
 
                 if let Some(target_id) = target_id {
                     if let Some(caller_id) = call.caller {
-                        self.references.add_reference(
-                            caller_id,
-                            target_id,
-                            Relationship::Calls,
-                        );
+                        self.references
+                            .add_reference(caller_id, target_id, Relationship::Calls);
                     }
                 }
             }
@@ -539,7 +555,8 @@ impl CodeSift {
         calls: &[crate::parser::CallReference],
         parsed_symbols: &[(SymbolId, String)],
     ) {
-        let mut local_index: std::collections::HashMap<String, SymbolId> = std::collections::HashMap::new();
+        let mut local_index: std::collections::HashMap<String, SymbolId> =
+            std::collections::HashMap::new();
         for (id, name) in parsed_symbols {
             local_index.insert(name.clone(), *id);
         }
@@ -548,20 +565,14 @@ impl CodeSift {
             if let Some(callee_id) = call.callee_name.strip_prefix("self::") {
                 if let Some(&target_id) = local_index.get(callee_id) {
                     if let Some(caller_id) = call.caller {
-                        self.references.add_reference(
-                            caller_id,
-                            target_id,
-                            Relationship::Calls,
-                        );
+                        self.references
+                            .add_reference(caller_id, target_id, Relationship::Calls);
                     }
                 }
             } else if let Some(&target_id) = local_index.get(&call.callee_name) {
                 if let Some(caller_id) = call.caller {
-                    self.references.add_reference(
-                        caller_id,
-                        target_id,
-                        Relationship::Calls,
-                    );
+                    self.references
+                        .add_reference(caller_id, target_id, Relationship::Calls);
                 }
             }
         }
@@ -593,9 +604,10 @@ impl CodeSift {
     /// Watch repository for filesystem changes and re-index incrementally.
     /// Blocks until interrupted (Ctrl+C).
     pub fn watch(&mut self) -> Result<()> {
-        let repo_path = self.repo_path.clone().ok_or_else(|| {
-            crate::error::Error::Index("No repository path set".to_string())
-        })?;
+        let repo_path = self
+            .repo_path
+            .clone()
+            .ok_or_else(|| crate::error::Error::Index("No repository path set".to_string()))?;
 
         let mut watcher = crate::FsWatcher::new(&repo_path)?;
         watcher.watch(&repo_path)?;

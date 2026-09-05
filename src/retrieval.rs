@@ -45,7 +45,9 @@ pub fn analyze_query(query: &str) -> RetrievalMode {
         .iter()
         .any(|w| query.to_lowercase().contains(w));
 
-    let is_identifier = query.chars().all(|c| c.is_alphanumeric() || c == '_' || c == ':');
+    let is_identifier = query
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == ':');
 
     if has_question_words || (query.len() > 20 && !is_identifier) {
         RetrievalMode::Hybrid
@@ -65,37 +67,31 @@ pub fn hybrid_search(
     let mode = analyze_query(query);
 
     match mode {
-        RetrievalMode::Lexical => {
-            lexical_only(query, index, budget)
-                .into_iter()
-                .map(|m| RetrievalResult {
-                    file_id: m.file_id,
-                    range: m.range,
-                    total_score: 1.0,
-                    lexical_score: 1.0,
-                    semantic_score: 0.0,
-                    symbol: None,
-                    relationship: None,
-                })
-                .collect()
-        }
-        RetrievalMode::Semantic => {
-            semantic_only(query, semantic_index, budget)
-                .into_iter()
-                .map(|m| RetrievalResult {
-                    file_id: m.file_id,
-                    range: m.range,
-                    total_score: m.score,
-                    lexical_score: 0.0,
-                    semantic_score: m.score,
-                    symbol: None,
-                    relationship: None,
-                })
-                .collect()
-        }
-        RetrievalMode::Hybrid => {
-            combine_results(query, index, semantic_index, budget, config)
-        }
+        RetrievalMode::Lexical => lexical_only(query, index, budget)
+            .into_iter()
+            .map(|m| RetrievalResult {
+                file_id: m.file_id,
+                range: m.range,
+                total_score: 1.0,
+                lexical_score: 1.0,
+                semantic_score: 0.0,
+                symbol: None,
+                relationship: None,
+            })
+            .collect(),
+        RetrievalMode::Semantic => semantic_only(query, semantic_index, budget)
+            .into_iter()
+            .map(|m| RetrievalResult {
+                file_id: m.file_id,
+                range: m.range,
+                total_score: m.score,
+                lexical_score: 0.0,
+                semantic_score: m.score,
+                symbol: None,
+                relationship: None,
+            })
+            .collect(),
+        RetrievalMode::Hybrid => combine_results(query, index, semantic_index, budget, config),
     }
 }
 
@@ -110,7 +106,11 @@ fn lexical_only(query: &str, index: &Index, budget: &TokenBudget) -> Vec<Lexical
     crate::search::search(&search_query, index, budget).unwrap_or_default()
 }
 
-fn semantic_only(query: &str, semantic_index: &SemanticIndex, budget: &TokenBudget) -> Vec<SemanticMatch> {
+fn semantic_only(
+    query: &str,
+    semantic_index: &SemanticIndex,
+    budget: &TokenBudget,
+) -> Vec<SemanticMatch> {
     semantic_index.search(query, budget.max_files * 10)
 }
 
@@ -143,14 +143,18 @@ fn combine_results(
     for (i, m) in lex_matches.iter().enumerate() {
         let key = format!("{}:{}", m.file_id.0, m.range.start_byte);
         let lex_rrf = 1.0 / (k + i as f64);
-        let entry = combined.entry(key).or_insert_with(|| (0.0, m.file_id, m.range.clone()));
+        let entry = combined
+            .entry(key)
+            .or_insert_with(|| (0.0, m.file_id, m.range.clone()));
         entry.0 += config.lexical_weight * lex_rrf;
     }
 
     for m in &sem_matches {
         let key = format!("{}:{}", m.file_id.0, m.range.start_byte);
         let sem_rrf = m.score;
-        let entry = combined.entry(key).or_insert_with(|| (0.0, m.file_id, m.range.clone()));
+        let entry = combined
+            .entry(key)
+            .or_insert_with(|| (0.0, m.file_id, m.range.clone()));
         entry.0 += config.semantic_weight * sem_rrf;
     }
 
@@ -171,7 +175,11 @@ fn combine_results(
         })
         .collect();
 
-    results.sort_by(|a, b| b.total_score.partial_cmp(&a.total_score).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| {
+        b.total_score
+            .partial_cmp(&a.total_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     results.truncate(budget.max_files * 10);
 
     results
@@ -200,7 +208,12 @@ pub fn build_semantic_index(index: &Index) -> SemanticIndex {
             fragments.push(semantic::CodeFragment {
                 id: format!("{}:{}", file.id.0, i),
                 file_id: file.id,
-                range: Range::new(start_byte, start_byte + line.len(), i as u32 + 1, i as u32 + 1),
+                range: Range::new(
+                    start_byte,
+                    start_byte + line.len(),
+                    i as u32 + 1,
+                    i as u32 + 1,
+                ),
                 text: line.to_string(),
             });
 
@@ -259,8 +272,14 @@ mod tests {
 
     #[test]
     fn test_analyze_query_natural_language() {
-        assert_eq!(analyze_query("How does the cache work?"), RetrievalMode::Hybrid);
-        assert_eq!(analyze_query("What is the token budget?"), RetrievalMode::Hybrid);
+        assert_eq!(
+            analyze_query("How does the cache work?"),
+            RetrievalMode::Hybrid
+        );
+        assert_eq!(
+            analyze_query("What is the token budget?"),
+            RetrievalMode::Hybrid
+        );
     }
 
     #[test]

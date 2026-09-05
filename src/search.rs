@@ -6,9 +6,10 @@ use crate::types::{FileId, Range};
 use rayon::prelude::*;
 
 /// Search mode for lexical queries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SearchMode {
     /// Match exact text.
+    #[default]
     Exact,
     /// Match as regex pattern.
     Regex,
@@ -16,12 +17,6 @@ pub enum SearchMode {
     Identifier,
     /// Case-insensitive match.
     CaseInsensitive,
-}
-
-impl Default for SearchMode {
-    fn default() -> Self {
-        Self::Exact
-    }
 }
 
 /// Search query parameters.
@@ -45,7 +40,11 @@ impl Default for SearchQuery {
 }
 
 /// Perform lexical search across the index.
-pub fn search(query: &SearchQuery, index: &Index, budget: &TokenBudget) -> Result<Vec<LexicalMatch>> {
+pub fn search(
+    query: &SearchQuery,
+    index: &Index,
+    budget: &TokenBudget,
+) -> Result<Vec<LexicalMatch>> {
     let max_results = query.max_results.min(budget.max_files * 100);
 
     // Get files to search
@@ -61,7 +60,13 @@ pub fn search(query: &SearchQuery, index: &Index, budget: &TokenBudget) -> Resul
         .par_iter()
         .filter_map(|&file_id| {
             let content = index.get_content(file_id)?;
-            Some(search_file_content(content, file_id, pattern, mode, max_results))
+            Some(search_file_content(
+                content,
+                file_id,
+                pattern,
+                mode,
+                max_results,
+            ))
         })
         .flatten()
         .collect();
@@ -86,18 +91,16 @@ fn search_file_content(
         let is_match = match mode {
             SearchMode::Exact => line.contains(pattern),
             SearchMode::CaseInsensitive => line.to_lowercase().contains(&pattern.to_lowercase()),
-            SearchMode::Identifier => {
-                line.split_whitespace().any(|word| word == pattern)
-            }
-            SearchMode::Regex => {
-                regex::Regex::new(pattern)
-                    .map(|re| re.is_match(line))
-                    .unwrap_or(false)
-            }
+            SearchMode::Identifier => line.split_whitespace().any(|word| word == pattern),
+            SearchMode::Regex => regex::Regex::new(pattern)
+                .map(|re| re.is_match(line))
+                .unwrap_or(false),
         };
 
         if is_match {
-            let start_byte = text.lines().take(line_number as usize - 1)
+            let start_byte = text
+                .lines()
+                .take(line_number as usize - 1)
                 .map(|l| l.len() + 1)
                 .sum::<usize>();
             let end_byte = start_byte + line.len();

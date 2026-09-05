@@ -30,7 +30,12 @@ impl Parser {
     }
 
     /// Parse source and extract symbols and references.
-    pub fn parse(&mut self, source: &[u8], lang: Language, file_id: crate::types::FileId) -> Result<ParsedFile> {
+    pub fn parse(
+        &mut self,
+        source: &[u8],
+        lang: Language,
+        file_id: crate::types::FileId,
+    ) -> Result<ParsedFile> {
         let tree = match lang {
             Language::Rust => {
                 let lang: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
@@ -60,15 +65,25 @@ impl Parser {
         }?;
 
         let (symbols, references, calls) = self.extract_all(&tree, source, file_id, lang);
-        Ok(ParsedFile { symbols, references, calls })
+        Ok(ParsedFile {
+            symbols,
+            references,
+            calls,
+        })
     }
 
-    fn parse_with_lang(&mut self, source: &[u8], lang: tree_sitter::Language) -> Result<tree_sitter::Tree> {
+    fn parse_with_lang(
+        &mut self,
+        source: &[u8],
+        lang: tree_sitter::Language,
+    ) -> Result<tree_sitter::Tree> {
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&lang)
+        parser
+            .set_language(&lang)
             .map_err(|e| Error::Parse(e.to_string()))?;
 
-        parser.parse(source, None)
+        parser
+            .parse(source, None)
             .ok_or_else(|| Error::Parse("failed to parse source".into()))
     }
 
@@ -78,17 +93,30 @@ impl Parser {
         source: &[u8],
         file_id: crate::types::FileId,
         lang: Language,
-    ) -> (Vec<Symbol>, Vec<(SymbolId, String, Relationship)>, Vec<CallReference>) {
+    ) -> (
+        Vec<Symbol>,
+        Vec<(SymbolId, String, Relationship)>,
+        Vec<CallReference>,
+    ) {
         let mut symbols = Vec::new();
-        let mut symbol_map: std::collections::HashMap<String, SymbolId> = std::collections::HashMap::new();
+        let mut symbol_map: std::collections::HashMap<String, SymbolId> =
+            std::collections::HashMap::new();
         let mut references = Vec::new();
         let mut calls = Vec::new();
         let mut next_id = 0u64;
 
         let root = tree.root_node();
         self.walk_node(
-            root, source, file_id, lang, None, &mut symbols,
-            &mut symbol_map, &mut references, &mut calls, &mut next_id,
+            root,
+            source,
+            file_id,
+            lang,
+            None,
+            &mut symbols,
+            &mut symbol_map,
+            &mut references,
+            &mut calls,
+            &mut next_id,
         );
 
         (symbols, references, calls)
@@ -130,16 +158,24 @@ impl Parser {
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 self.walk_node(
-                    child, source, file_id, lang, Some(id), symbols,
-                    symbol_map, references, calls, next_id,
+                    child,
+                    source,
+                    file_id,
+                    lang,
+                    Some(id),
+                    symbols,
+                    symbol_map,
+                    references,
+                    calls,
+                    next_id,
                 );
             }
         } else {
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 self.walk_node(
-                    child, source, file_id, lang, parent, symbols,
-                    symbol_map, references, calls, next_id,
+                    child, source, file_id, lang, parent, symbols, symbol_map, references, calls,
+                    next_id,
                 );
             }
         }
@@ -171,7 +207,10 @@ impl Parser {
         }
 
         // JavaScript/TypeScript: call expressions
-        if callee_name.is_none() && kind == "call_expression" && matches!(lang, Language::JavaScript | Language::TypeScript) {
+        if callee_name.is_none()
+            && kind == "call_expression"
+            && matches!(lang, Language::JavaScript | Language::TypeScript)
+        {
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 if child.kind() == "identifier" || child.kind() == "member_expression" {
@@ -219,7 +258,10 @@ impl Parser {
         }
 
         // C/C++: call_expression
-        if callee_name.is_none() && kind == "call_expression" && matches!(lang, Language::C | Language::Cpp) {
+        if callee_name.is_none()
+            && kind == "call_expression"
+            && matches!(lang, Language::C | Language::Cpp)
+        {
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 if child.kind() == "identifier" || child.kind() == "field_expression" {
@@ -233,7 +275,10 @@ impl Parser {
         callee_name.map(|name| CallReference {
             caller,
             caller_name: caller.and_then(|id| {
-                symbol_map.iter().find(|(_, v)| **v == id).map(|(n, _)| n.clone())
+                symbol_map
+                    .iter()
+                    .find(|(_, v)| **v == id)
+                    .map(|(n, _)| n.clone())
             }),
             callee_name: name,
             range: range.unwrap_or(Range::new(0, 0, 0, 0)),
@@ -264,53 +309,108 @@ impl Parser {
         let kind = node.kind();
         let (symbol_kind, name) = match kind {
             // Rust
-            "function_item" => (SymbolKind::Function, self.find_name_in_node(node, source, &["identifier", "declarator"])),
-            "struct_item" => (SymbolKind::Struct, self.find_name_in_node(node, source, &["type_identifier", "identifier"])),
-            "enum_item" => (SymbolKind::Enum, self.find_name_in_node(node, source, &["type_identifier", "identifier"])),
-            "trait_item" => (SymbolKind::Trait, self.find_name_in_node(node, source, &["type_identifier", "identifier"])),
-            "impl_item" => (SymbolKind::Impl, self.find_name_in_node(node, source, &["type_identifier", "identifier"])),
-            "const_item" => (SymbolKind::Constant, self.find_name_in_node(node, source, &["identifier"])),
+            "function_item" => (
+                SymbolKind::Function,
+                self.find_name_in_node(node, source, &["identifier", "declarator"]),
+            ),
+            "struct_item" => (
+                SymbolKind::Struct,
+                self.find_name_in_node(node, source, &["type_identifier", "identifier"]),
+            ),
+            "enum_item" => (
+                SymbolKind::Enum,
+                self.find_name_in_node(node, source, &["type_identifier", "identifier"]),
+            ),
+            "trait_item" => (
+                SymbolKind::Trait,
+                self.find_name_in_node(node, source, &["type_identifier", "identifier"]),
+            ),
+            "impl_item" => (
+                SymbolKind::Impl,
+                self.find_name_in_node(node, source, &["type_identifier", "identifier"]),
+            ),
+            "const_item" => (
+                SymbolKind::Constant,
+                self.find_name_in_node(node, source, &["identifier"]),
+            ),
 
             // JavaScript/TypeScript
-            "function_declaration" if matches!(lang, Language::JavaScript | Language::TypeScript) =>
-                (SymbolKind::Function, self.find_name_in_node(node, source, &["identifier", "function"])),
-            "class_declaration" if matches!(lang, Language::JavaScript | Language::TypeScript) =>
-                (SymbolKind::Class, self.find_name_in_node(node, source, &["identifier", "class"])),
+            "function_declaration"
+                if matches!(lang, Language::JavaScript | Language::TypeScript) =>
+            {
+                (
+                    SymbolKind::Function,
+                    self.find_name_in_node(node, source, &["identifier", "function"]),
+                )
+            }
+            "class_declaration" if matches!(lang, Language::JavaScript | Language::TypeScript) => (
+                SymbolKind::Class,
+                self.find_name_in_node(node, source, &["identifier", "class"]),
+            ),
 
             // Python and C/C++
-            "function_definition" =>
-                (SymbolKind::Function, self.find_name_in_node(node, source, &["identifier"])),
-            "class_definition" => (SymbolKind::Class, self.find_name_in_node(node, source, &["identifier"])),
+            "function_definition" => (
+                SymbolKind::Function,
+                self.find_name_in_node(node, source, &["identifier"]),
+            ),
+            "class_definition" => (
+                SymbolKind::Class,
+                self.find_name_in_node(node, source, &["identifier"]),
+            ),
 
             // Go
-            "function_declaration" if lang == Language::Go =>
-                (SymbolKind::Function, self.find_name_in_node(node, source, &["identifier"])),
-            "method_declaration" if lang == Language::Go =>
-                (SymbolKind::Method, self.find_name_in_node(node, source, &["field_identifier"])),
-            "type_declaration" if lang == Language::Go =>
-                (SymbolKind::Type, self.find_name_in_node(node, source, &["type_identifier"])),
-            "struct_type" if lang == Language::Go =>
-                (SymbolKind::Struct, self.find_name_in_node(node, source, &["type_identifier"])),
-            "interface_type" if lang == Language::Go =>
-                (SymbolKind::Interface, self.find_name_in_node(node, source, &["type_identifier"])),
+            "function_declaration" if lang == Language::Go => (
+                SymbolKind::Function,
+                self.find_name_in_node(node, source, &["identifier"]),
+            ),
+            "method_declaration" if lang == Language::Go => (
+                SymbolKind::Method,
+                self.find_name_in_node(node, source, &["field_identifier"]),
+            ),
+            "type_declaration" if lang == Language::Go => (
+                SymbolKind::Type,
+                self.find_name_in_node(node, source, &["type_identifier"]),
+            ),
+            "struct_type" if lang == Language::Go => (
+                SymbolKind::Struct,
+                self.find_name_in_node(node, source, &["type_identifier"]),
+            ),
+            "interface_type" if lang == Language::Go => (
+                SymbolKind::Interface,
+                self.find_name_in_node(node, source, &["type_identifier"]),
+            ),
 
             // Java
-            "class_declaration" if lang == Language::Java =>
-                (SymbolKind::Class, self.find_name_in_node(node, source, &["identifier"])),
-            "method_declaration" if lang == Language::Java =>
-                (SymbolKind::Method, self.find_name_in_node(node, source, &["identifier"])),
-            "interface_declaration" if lang == Language::Java =>
-                (SymbolKind::Interface, self.find_name_in_node(node, source, &["identifier"])),
-            "field_declaration" if lang == Language::Java =>
-                (SymbolKind::Field, self.find_name_in_node(node, source, &["identifier"])),
+            "class_declaration" if lang == Language::Java => (
+                SymbolKind::Class,
+                self.find_name_in_node(node, source, &["identifier"]),
+            ),
+            "method_declaration" if lang == Language::Java => (
+                SymbolKind::Method,
+                self.find_name_in_node(node, source, &["identifier"]),
+            ),
+            "interface_declaration" if lang == Language::Java => (
+                SymbolKind::Interface,
+                self.find_name_in_node(node, source, &["identifier"]),
+            ),
+            "field_declaration" if lang == Language::Java => (
+                SymbolKind::Field,
+                self.find_name_in_node(node, source, &["identifier"]),
+            ),
 
             // C/C++
-            "struct_specifier" if matches!(lang, Language::C | Language::Cpp) =>
-                (SymbolKind::Struct, self.find_name_in_node(node, source, &["type_identifier", "identifier"])),
-            "class_specifier" if lang == Language::Cpp =>
-                (SymbolKind::Class, self.find_name_in_node(node, source, &["type_identifier", "identifier"])),
-            "enum_specifier" if matches!(lang, Language::C | Language::Cpp) =>
-                (SymbolKind::Enum, self.find_name_in_node(node, source, &["type_identifier", "identifier"])),
+            "struct_specifier" if matches!(lang, Language::C | Language::Cpp) => (
+                SymbolKind::Struct,
+                self.find_name_in_node(node, source, &["type_identifier", "identifier"]),
+            ),
+            "class_specifier" if lang == Language::Cpp => (
+                SymbolKind::Class,
+                self.find_name_in_node(node, source, &["type_identifier", "identifier"]),
+            ),
+            "enum_specifier" if matches!(lang, Language::C | Language::Cpp) => (
+                SymbolKind::Enum,
+                self.find_name_in_node(node, source, &["type_identifier", "identifier"]),
+            ),
 
             _ => return None,
         };
@@ -331,7 +431,12 @@ impl Parser {
         })
     }
 
-    fn find_name_in_node(&self, node: tree_sitter::Node, source: &[u8], target_kinds: &[&str]) -> Option<String> {
+    fn find_name_in_node(
+        &self,
+        node: tree_sitter::Node,
+        source: &[u8],
+        target_kinds: &[&str],
+    ) -> Option<String> {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             if target_kinds.contains(&child.kind()) {
@@ -346,7 +451,9 @@ impl Parser {
     fn extract_text(&self, node: &tree_sitter::Node, source: &[u8]) -> Option<String> {
         let start = node.start_byte();
         let end = node.end_byte();
-        source.get(start..end).and_then(|s| String::from_utf8(s.to_vec()).ok())
+        source
+            .get(start..end)
+            .and_then(|s| String::from_utf8(s.to_vec()).ok())
     }
 }
 

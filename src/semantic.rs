@@ -84,10 +84,7 @@ impl SemanticIndex {
         self.doc_count = self.documents.len();
 
         // Compute IDF
-        let vocab: HashSet<_> = doc_term_counts
-            .iter()
-            .flat_map(|t| t.keys())
-            .collect();
+        let vocab: HashSet<_> = doc_term_counts.iter().flat_map(|t| t.keys()).collect();
 
         for term in vocab {
             let docs_with_term = doc_term_counts
@@ -121,7 +118,12 @@ impl SemanticIndex {
             .collect();
 
         // Compute query vector magnitude
-        let query_mag = query_vec.values().map(|v| v * v).sum::<f64>().sqrt().max(1e-10);
+        let query_mag = query_vec
+            .values()
+            .map(|v| v * v)
+            .sum::<f64>()
+            .sqrt()
+            .max(1e-10);
 
         // Score all documents
         let mut scores: Vec<(usize, f64)> = self
@@ -230,16 +232,10 @@ fn tokenize_code(text: &str) -> Vec<String> {
 fn is_stop_word(term: &str) -> bool {
     matches!(
         term,
-        // Common control flow / declarations across most languages
-        "fn" | "let" | "mut" | "pub" | "use" | "mod" | "struct"
-            | "impl" | "trait" | "enum" | "match" | "if" | "else"
-            | "for" | "while" | "loop" | "return" | "self" | "super"
-            | "crate" | "in" | "as" | "ref" | "move" | "const"
-            | "static" | "type" | "where" | "async" | "await"
-            | "unsafe" | "extern"
-            // Common types / literals
+        // Common control flow / keywords across most languages
+        "if" | "else" | "for" | "while" | "return"
+            // Common boolean / nil literals
             | "true" | "false" | "nil" | "none"
-            | "void" | "int" | "string" | "bool" | "float" | "double"
     )
 }
 
