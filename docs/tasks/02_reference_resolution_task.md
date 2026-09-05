@@ -23,10 +23,10 @@ Implement proper symbol reference resolution to link call sites to their definit
 - `src/lib.rs` - Add resolution methods
 
 ## Acceptance Criteria
-- [ ] Calls are linked to their definitions
-- [ ] `find_references()` returns all call sites
-- [ ] `get_definition()` returns the definition site
-- [ ] Cross-file references are resolved
+- [x] Calls are linked to their definitions
+- [x] `find_references()` returns all call sites
+- [x] `get_definition()` returns the definition site
+- [x] Cross-file references are resolved
 
 ## Status
-- [ ] Not started
+- [x] Completed

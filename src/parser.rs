@@ -7,6 +7,7 @@ use crate::types::{Language, Range, Relationship, Symbol, SymbolId, SymbolKind, 
 #[derive(Debug, Clone)]
 pub struct CallReference {
     pub caller: Option<SymbolId>,
+    pub caller_name: Option<String>,
     pub callee_name: String,
     pub range: Range,
 }
@@ -94,8 +95,8 @@ impl Parser {
     ) {
         let _node_kind = node.kind();
 
-        // Extract call references
-        if let Some(call_info) = self.extract_call(node, source, parent) {
+        // Extract call references (pass symbol_map for caller name resolution)
+        if let Some(call_info) = self.extract_call(node, source, parent, symbol_map) {
             calls.push(call_info);
         }
 
@@ -130,47 +131,62 @@ impl Parser {
         }
     }
 
-    fn extract_call(&self, node: tree_sitter::Node, source: &[u8], caller: Option<SymbolId>) -> Option<CallReference> {
+    fn extract_call(
+        &self,
+        node: tree_sitter::Node,
+        source: &[u8],
+        caller: Option<SymbolId>,
+        symbol_map: &std::collections::HashMap<String, SymbolId>,
+    ) -> Option<CallReference> {
         let kind = node.kind();
+
+        let mut callee_name = None;
+        let mut range = None;
 
         // Rust: function calls, method calls
         if kind == "call_expression" {
-            // Get the function being called
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 if child.kind() == "identifier" || child.kind() == "field_expression" {
-                    let name = self.extract_text(&child, source)?;
-                    let range = self.node_to_range(&child);
-                    return Some(CallReference { caller, callee_name: name, range });
+                    callee_name = self.extract_text(&child, source);
+                    range = Some(self.node_to_range(&child));
+                    break;
                 }
             }
         }
 
         // JavaScript/TypeScript: call expressions
-        if kind == "call_expression" {
+        if callee_name.is_none() && kind == "call_expression" {
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 if child.kind() == "identifier" || child.kind() == "member_expression" {
-                    let name = self.extract_text(&child, source)?;
-                    let range = self.node_to_range(&child);
-                    return Some(CallReference { caller, callee_name: name, range });
+                    callee_name = self.extract_text(&child, source);
+                    range = Some(self.node_to_range(&child));
+                    break;
                 }
             }
         }
 
         // Python: call expressions
-        if kind == "call" {
+        if callee_name.is_none() && kind == "call" {
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 if child.kind() == "identifier" || child.kind() == "attribute" {
-                    let name = self.extract_text(&child, source)?;
-                    let range = self.node_to_range(&child);
-                    return Some(CallReference { caller, callee_name: name, range });
+                    callee_name = self.extract_text(&child, source);
+                    range = Some(self.node_to_range(&child));
+                    break;
                 }
             }
         }
 
-        None
+        callee_name.map(|name| CallReference {
+            caller,
+            caller_name: caller.and_then(|id| {
+                symbol_map.iter().find(|(_, v)| **v == id).map(|(n, _)| n.clone())
+            }),
+            callee_name: name,
+            range: range.unwrap_or(Range::new(0, 0, 0, 0)),
+        })
     }
 
     fn node_to_range(&self, node: &tree_sitter::Node) -> Range {

@@ -19,6 +19,8 @@ pub mod watcher;
 
 #[cfg(test)]
 pub mod watcher_tests;
+#[cfg(test)]
+pub mod reference_tests;
 
 use crate::context::plan_context;
 use crate::error::Result;
@@ -61,43 +63,39 @@ impl CodeSift {
             repo_path: Some(path.clone()),
         };
 
-        // Index all files
+        let mut all_calls: Vec<crate::parser::CallReference> = Vec::new();
+        let mut all_parsed_symbols: Vec<(SymbolId, String)> = Vec::new();
+
         for file in repo.files() {
             let file_id = codesift.index.add_file(file.clone());
 
-            // Skip non-text files
             if file.is_binary || file.is_vendor {
                 continue;
             }
 
-            // Read and store content
             let content = repo.read_file(file_id)?;
             codesift.index.store_content(file_id, content.clone());
 
-            // Parse and extract symbols and references
             if let Ok(parsed) = codesift.parser.parse(&content, file.language, file_id) {
-                // Add symbols to index
+                let mut parsed_symbols = Vec::new();
                 for symbol in &parsed.symbols {
                     let sym_id = codesift.index.add_symbol(symbol.clone());
-
-                    // Build call graph
-                    for call in &parsed.calls {
-                        if let Some(caller_id) = call.caller {
-                            codesift.references.add_reference(
-                                caller_id,
-                                sym_id,
-                                Relationship::Calls,
-                            );
-                        }
-                    }
+                    parsed_symbols.push((sym_id, symbol.name.clone()));
                 }
 
-                // Store references
-                for (sym_id, _, rel) in &parsed.references {
-                    codesift.index.add_reference(*sym_id, *sym_id, rel.clone());
+                for call in &parsed.calls {
+                    all_calls.push(crate::parser::CallReference {
+                        caller: call.caller,
+                        caller_name: call.caller_name.clone(),
+                        callee_name: call.callee_name.clone(),
+                        range: call.range,
+                    });
                 }
+                all_parsed_symbols.extend(parsed_symbols);
             }
         }
+
+        codesift.resolve_all_references(&all_calls, &all_parsed_symbols);
 
         Ok(codesift)
     }
@@ -308,6 +306,9 @@ impl CodeSift {
         self.index = Index::new();
         self.references = ReferenceIndex::new();
 
+        let mut all_calls: Vec<crate::parser::CallReference> = Vec::new();
+        let mut all_parsed_symbols: Vec<(SymbolId, String)> = Vec::new();
+
         for file in repo.files() {
             let file_id = self.index.add_file(file.clone());
 
@@ -319,22 +320,135 @@ impl CodeSift {
             self.index.store_content(file_id, content.clone());
 
             if let Ok(parsed) = self.parser.parse(&content, file.language, file_id) {
+                let mut parsed_symbols = Vec::new();
                 for symbol in &parsed.symbols {
-                    let _ = self.index.add_symbol(symbol.clone());
+                    let sym_id = self.index.add_symbol(symbol.clone());
+                    parsed_symbols.push((sym_id, symbol.name.clone()));
                 }
 
-                for (sym_id, _, rel) in &parsed.references {
-                    self.index.add_reference(*sym_id, *sym_id, rel.clone());
+                for call in &parsed.calls {
+                    all_calls.push(crate::parser::CallReference {
+                        caller: call.caller,
+                        caller_name: call.caller_name.clone(),
+                        callee_name: call.callee_name.clone(),
+                        range: call.range,
+                    });
                 }
+                all_parsed_symbols.extend(parsed_symbols);
             }
         }
 
+        self.resolve_all_references(&all_calls, &all_parsed_symbols);
         Ok(())
     }
 
     /// Get the repository path.
     pub fn repo_path(&self) -> Option<&std::path::Path> {
         self.repo_path.as_deref()
+    }
+
+    /// Resolve all call references using the global symbol index.
+    /// This handles both intra-file and cross-file references.
+    pub fn resolve_all_references(
+        &mut self,
+        calls: &[crate::parser::CallReference],
+        _parsed_symbols: &[(SymbolId, String)],
+    ) {
+        // Build global symbol name -> SymbolId map
+        let mut global_index: std::collections::HashMap<String, Vec<SymbolId>> = std::collections::HashMap::new();
+        for symbol in self.index.symbols() {
+            global_index
+                .entry(symbol.name.clone())
+                .or_default()
+                .push(symbol.id);
+        }
+
+        for call in calls {
+            let target_name = call.callee_name.trim_start_matches("self::");
+
+            // Look up callee by name in global index
+            if let Some(callee_ids) = global_index.get(target_name) {
+                // Prefer same-file resolution
+                let target_id = if let Some(caller_id) = call.caller {
+                    if let Some(caller_symbol) = self.index.get_symbol(caller_id) {
+                        callee_ids.iter().find_map(|&id| {
+                            self.index.get_symbol(id).filter(|s| s.file_id == caller_symbol.file_id).map(|_| id)
+                        }).or_else(|| callee_ids.first().copied())
+                    } else {
+                        callee_ids.first().copied()
+                    }
+                } else {
+                    callee_ids.first().copied()
+                };
+
+                if let Some(target_id) = target_id {
+                    if let Some(caller_id) = call.caller {
+                        self.references.add_reference(
+                            caller_id,
+                            target_id,
+                            Relationship::Calls,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Resolve call references to actual symbol IDs using a local symbol index.
+    pub fn resolve_references(
+        &mut self,
+        calls: &[crate::parser::CallReference],
+        parsed_symbols: &[(SymbolId, String)],
+    ) {
+        let mut local_index: std::collections::HashMap<String, SymbolId> = std::collections::HashMap::new();
+        for (id, name) in parsed_symbols {
+            local_index.insert(name.clone(), *id);
+        }
+
+        for call in calls {
+            if let Some(callee_id) = call.callee_name.strip_prefix("self::") {
+                if let Some(&target_id) = local_index.get(callee_id) {
+                    if let Some(caller_id) = call.caller {
+                        self.references.add_reference(
+                            caller_id,
+                            target_id,
+                            Relationship::Calls,
+                        );
+                    }
+                }
+            } else if let Some(&target_id) = local_index.get(&call.callee_name) {
+                if let Some(caller_id) = call.caller {
+                    self.references.add_reference(
+                        caller_id,
+                        target_id,
+                        Relationship::Calls,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Find all references to a symbol across the codebase.
+    pub fn find_references(&self, name: &str) -> Vec<(&Symbol, Relationship)> {
+        let mut results = Vec::new();
+
+        // Find all symbols with this name
+        for id in self.index.find_symbols_by_name(name) {
+            // Get incoming references for this symbol
+            for (from_id, rel) in self.references.get_incoming(id) {
+                if let Some(from_symbol) = self.index.get_symbol(*from_id) {
+                    results.push((from_symbol, *rel));
+                }
+            }
+        }
+
+        results
+    }
+
+    /// Get the definition site for a symbol by name.
+    /// Returns all definitions matching the name.
+    pub fn get_definition(&self, name: &str) -> Vec<&Symbol> {
+        self.find_symbol(name)
     }
 
     /// Watch repository for filesystem changes and re-index incrementally.
