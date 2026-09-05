@@ -30,10 +30,21 @@ Add optional persistent storage for the index to enable fast startup without re-
 - `src/lib.rs` - Add open_from_cache
 
 ## Acceptance Criteria
-- [ ] Index is serialized to disk
-- [ ] Index loads from cache on startup
-- [ ] Cache invalidation works correctly
-- [ ] Large repos benefit from caching
+- [x] Index is serialized to disk
+- [x] Index loads from cache on startup
+- [x] Cache invalidation works correctly
+- [x] Large repos benefit from caching
 
 ## Status
-- [ ] Not started
+- [x] Completed (2026-09-05)
+
+## Implementation Notes
+- Added `src/storage.rs` with `Storage` struct for cache management
+- Cache stored in `.codesift/` directory with:
+  - `manifest.json` - metadata (version, file/symbol counts)
+  - `index.bin` - serialized index data (files, symbols, references)
+  - `hashes.bin` - file hashes for invalidation
+- Added `--use-cache` flag to use cached index
+- Cache invalidation uses file modification time + size hash
+- Added methods to Index: `insert_file`, `insert_path`, `insert_symbol`, `set_next_file_id`, `set_next_symbol_id`
+- `open_cached()` tries cache first, falls back to full index if invalid

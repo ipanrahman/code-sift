@@ -257,6 +257,76 @@ impl Index {
     pub fn has_file(&self, path: &Path) -> bool {
         self.paths.contains_key(path)
     }
+
+    /// Insert a file entry directly (for deserialization).
+    pub fn insert_file(&mut self, entry: FileEntry) {
+        self.files.insert(entry.id, entry);
+    }
+
+    /// Insert a path mapping directly (for deserialization).
+    pub fn insert_path(&mut self, path: PathBuf, id: FileId) {
+        self.paths.insert(path, id);
+    }
+
+    /// Insert a symbol directly with its existing ID (for deserialization).
+    /// Does NOT update the next_symbol_id counter - use set_next_symbol_id after.
+    pub fn insert_symbol(&mut self, symbol: Symbol) {
+        let id = symbol.id;
+
+        // Insert into main symbol map
+        self.symbols.insert(id, symbol.clone());
+
+        // Index by name
+        self.symbols_by_name
+            .entry(symbol.name.clone())
+            .or_default()
+            .push(id);
+
+        // Index by file
+        self.symbols_by_file
+            .entry(symbol.file_id)
+            .or_default()
+            .push(id);
+    }
+
+    /// Set next file ID counter (for deserialization).
+    pub fn set_next_file_id(&mut self, id: u64) {
+        self.next_file_id = id;
+    }
+
+    /// Set next symbol ID counter (for deserialization).
+    pub fn set_next_symbol_id(&mut self, id: u64) {
+        self.next_symbol_id = id;
+    }
+
+    /// Get next file ID (for serialization).
+    pub fn next_file_id(&self) -> u64 {
+        self.next_file_id
+    }
+
+    /// Get next symbol ID (for serialization).
+    pub fn next_symbol_id(&self) -> u64 {
+        self.next_symbol_id
+    }
+
+    /// Add all references from serializable data.
+    pub fn add_references_from_serializable(&mut self, references: Vec<(u64, u64, u8)>) {
+        for (from, to, rel) in references {
+            self.references
+                .entry(SymbolId(from))
+                .or_default()
+                .push((SymbolId(to), unsafe { std::mem::transmute(rel) }));
+        }
+    }
+
+    /// Get all references for serialization.
+    pub fn all_references(&self) -> Vec<(SymbolId, SymbolId, Relationship)> {
+        self.references.iter()
+            .flat_map(|(from, refs)| {
+                refs.iter().map(move |(to, rel)| (*from, *to, *rel))
+            })
+            .collect()
+    }
 }
 
 /// Lexical search result.

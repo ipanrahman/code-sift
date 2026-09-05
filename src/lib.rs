@@ -4,6 +4,7 @@ pub use crate::context::{ContextFragment, ContextPlan};
 pub use crate::graph::ReferenceIndex;
 pub use crate::index::TokenBudget;
 pub use crate::mcp::McpServer;
+pub use crate::storage::Storage;
 pub use crate::watcher::{FileChange, FsWatcher};
 pub mod context;
 pub mod error;
@@ -14,6 +15,7 @@ pub mod parser;
 pub mod ranking;
 pub mod repository;
 pub mod search;
+pub mod storage;
 pub mod types;
 pub mod watcher;
 
@@ -96,6 +98,65 @@ impl CodeSift {
         }
 
         codesift.resolve_all_references(&all_calls, &all_parsed_symbols);
+
+        Ok(codesift)
+    }
+
+    /// Save index to cache for faster startup.
+    pub fn save_cache(&self) -> Result<()> {
+        let path = self.repo_path.as_ref().ok_or_else(|| {
+            crate::error::Error::Index("No repository path set".to_string())
+        })?;
+        let storage = Storage::new(path);
+        storage.save(&self.index, path).map_err(|e| {
+            crate::error::Error::Index(format!("Failed to save cache: {}", e))
+        })
+    }
+
+    /// Open repository, using cache if available and valid.
+    pub fn open_cached(path: impl AsRef<std::path::Path>) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        let storage = Storage::new(&path);
+
+        // Try to load from cache
+        if storage.cache_exists() {
+            if let Ok((index, references)) = storage.load() {
+                // Check if files have changed
+                let cached_hashes = storage.get_file_hashes().unwrap_or_default();
+                let repo = repository::Repository::open(&path).ok();
+
+                let mut current_hashes = std::collections::HashMap::new();
+                if let Some(ref repo) = repo {
+                    for file in repo.files() {
+                        if !file.is_binary && !file.is_vendor {
+                            let hash = crate::storage::hash_file(&file.path);
+                            current_hashes.insert(
+                                file.path.to_string_lossy().to_string(),
+                                (hash, file.modified_at),
+                            );
+                        }
+                    }
+                }
+
+                if !crate::storage::files_changed(&cached_hashes, &current_hashes) {
+                    // Cache is valid, use it
+                    return Ok(Self {
+                        index,
+                        parser: Parser::new(),
+                        references,
+                        repo_path: Some(path),
+                    });
+                }
+            }
+        }
+
+        // Cache miss or invalid - build from scratch
+        let codesift = Self::open(&path)?;
+
+        // Try to save cache
+        if let Err(e) = codesift.save_cache() {
+            eprintln!("Warning: failed to save cache: {}", e);
+        }
 
         Ok(codesift)
     }

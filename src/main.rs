@@ -21,11 +21,11 @@ struct Args {
     mode: SearchMode,
 
     /// Maximum tokens to return
-    #[arg(short, long, default_value = "2000")]
+    #[arg(long, default_value = "2000")]
     max_tokens: usize,
 
     /// Maximum files to include
-    #[arg(short, long, default_value = "10")]
+    #[arg(long, default_value = "10")]
     max_files: usize,
 
     /// Maximum symbols to return
@@ -39,6 +39,10 @@ struct Args {
     /// MCP server mode (JSON-RPC 2.0)
     #[arg(long)]
     mcp: bool,
+
+    /// Use cached index for faster startup
+    #[arg(long)]
+    use_cache: bool,
 
     /// Watch repository for filesystem changes (incremental re-index)
     #[arg(long)]
@@ -71,7 +75,11 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // Initialize CodeSift
-    let codesift = CodeSift::open(&args.repo)?;
+    let codesift = if args.use_cache {
+        CodeSift::open_cached(&args.repo)?
+    } else {
+        CodeSift::open(&args.repo)?
+    };
 
     if args.mcp {
         run_mcp_server(codesift)
