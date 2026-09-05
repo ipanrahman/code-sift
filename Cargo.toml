@@ -44,6 +44,22 @@ tempfile = "3.12"
 name = "search"
 harness = false
 
+[[bench]]
+name = "indexing"
+harness = false
+
+[[bench]]
+name = "context_planning"
+harness = false
+
+[[bench]]
+name = "token_efficiency"
+harness = false
+
+[[bench]]
+name = "memory_usage"
+harness = false
+
 [lib]
 name = "codesift"
 path = "src/lib.rs"

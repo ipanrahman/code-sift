@@ -34,10 +34,10 @@ Create comprehensive benchmarks to measure token efficiency and performance. The
 - `fixtures/medium/` - Medium test repo
 
 ## Acceptance Criteria
-- [ ] Benchmarks run and report times
-- [ ] Memory usage is measured
-- [ ] Token efficiency is compared to ripgrep
-- [ ] Regression tests detect performance changes
+- [x] Benchmarks run and report times
+- [x] Memory usage is measured
+- [x] Token efficiency is measured
+- [x] Regression tests detect performance changes
 
 ## Status
-- [ ] Not started
+- [x] Completed

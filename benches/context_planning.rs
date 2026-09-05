@@ -1,17 +1,17 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use codesift::CodeSift;
+use codesift::{CodeSift, TokenBudget};
 
-fn benchmark_search(c: &mut Criterion) {
-    let mut group = c.benchmark_group("search_latency");
+fn benchmark_context_planning(c: &mut Criterion) {
+    let mut group = c.benchmark_group("context_planning");
 
     for repo in &["fixtures/small", "fixtures/medium"] {
         let cs = CodeSift::open(repo).unwrap();
 
         for query in &["add", "format", "handle"] {
             let id = BenchmarkId::new(*query, *repo);
-            group.bench_with_input(id, query, |b, &query| {
+            group.bench_with_input(id, repo, |b, _| {
                 b.iter(|| {
-                    let _ = cs.search(black_box(query), None);
+                    let _ = cs.plan_context(black_box(query), Some(TokenBudget::new(2000)));
                 });
             });
         }
@@ -20,5 +20,5 @@ fn benchmark_search(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, benchmark_search);
+criterion_group!(benches, benchmark_context_planning);
 criterion_main!(benches);
