@@ -21,6 +21,32 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | codesift --r
 codesift --repo . "my query"
 ```
 
+## Workspace Search (zvec_grep)
+
+This project uses zvec_grep MCP for all code intelligence. Native tools are deprecated.
+
+### Tool Selection Guide
+
+| Task | Use | Why |
+|------|-----|-----|
+| Exact word, regex, known location | `zvec_grep_zvec_grep_rg` | Fast, bounded results |
+| Semantic, conceptual, unknown location | `zvec_grep_zvec_grep_search` | Fuzzy, cross-file relationships |
+| Open-ended codebase exploration | `Task` (explore agent) | Multi-round synthesis |
+| File patterns (glob) | `Glob` | When zvec_grep insufficient |
+
+### Routing Rules
+
+1. **Exact anchor** (filename, function name, error msg, regex) → `zvec_grep_zvec_grep_rg`
+2. **Conceptual/relationship** (architecture, data flow, "how does X work") → `zvec_grep_zvec_grep_search`
+3. **Mixed**: probe `zvec_grep_zvec_grep_search` first, then `zvec_grep_zvec_grep_rg` for specifics
+4. **Do NOT** use `bash grep/cat/find` for search - use zvec_grep tools
+
+### Index Lifecycle
+
+- Index is auto-managed by daemon; trust freshness signal in results
+- If index missing but exact lookup needed → fall back to `Grep`/`Glob`
+- Never rebuild index without explicit user request
+
 ## Build
 
 - `cargo build`           → debug build (no bincode)
